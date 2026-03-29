@@ -53,8 +53,8 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsImageGeneration: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT54_DEPLOYMENT_NAME,
     defaultReasoningEffort: "low",
-    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
-    contextWindow: 400000,
+    pricing: { inputPerMillion: 2.50, outputPerMillion: 15.00, cachedInputPerMillion: 0.25 },
+    contextWindow: 1050000,
     fallbackModel: "gpt-5.4-mini",
   },
   "gpt-5.4-mini": {
@@ -66,8 +66,8 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsResponsesAPI: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT54_MINI_DEPLOYMENT_NAME,
     defaultReasoningEffort: "medium",
-    pricing: { inputPerMillion: 0.40, outputPerMillion: 1.60, cachedInputPerMillion: 0.10 },
-    contextWindow: 1047576,
+    pricing: { inputPerMillion: 0.75, outputPerMillion: 4.50, cachedInputPerMillion: 0.075 },
+    contextWindow: 400000,
   },
   "gpt-5.3-chat": {
     id: "gpt-5.3-chat",
@@ -78,8 +78,8 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsResponsesAPI: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT53_CHAT_DEPLOYMENT_NAME,
     defaultReasoningEffort: "medium",
-    pricing: { inputPerMillion: 1.50, outputPerMillion: 6.00, cachedInputPerMillion: 0.375 },
-    contextWindow: 1047576,
+    pricing: { inputPerMillion: 1.75, outputPerMillion: 14.00, cachedInputPerMillion: 0.175 },
+    contextWindow: 128000,
     fallbackModel: "gpt-5.4-mini",
   },
 };
