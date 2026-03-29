@@ -105,7 +105,7 @@ export const UserUsage = () => {
               <p className="tabular-nums font-medium text-sm">{usage.daily.totalTokens.toLocaleString()}</p>
             </div>
             <div>
-              <p className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Est. Cost</p>
+              <p className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Est. cost ~</p>
               <p className="tabular-nums font-medium text-sm">{formatCost(usage.daily.totalCostUsd)}</p>
             </div>
           </div>
@@ -126,7 +126,7 @@ export const UserUsage = () => {
                   <p className="tabular-nums font-medium text-sm">{usage.weekly.totalTokens.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Est. Cost</p>
+                  <p className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Est. cost ~</p>
                   <p className="tabular-nums font-medium text-sm">{formatCost(usage.weekly.totalCostUsd)}</p>
                 </div>
               </div>

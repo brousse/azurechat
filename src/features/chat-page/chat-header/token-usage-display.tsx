@@ -65,7 +65,7 @@ export const TokenUsageDisplay: FC = () => {
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="start" className="w-56">
         <DropdownMenuLabel className="font-normal pb-2">
-          <p className="text-sm font-semibold tracking-tight mb-2">Thread Usage</p>
+          <p className="text-sm font-semibold tracking-tight mb-2">Thread Usage <span className="text-[10px] font-normal text-muted-foreground">(estimated)</span></p>
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Total tokens</span>
@@ -91,11 +91,11 @@ export const TokenUsageDisplay: FC = () => {
         <DropdownMenuLabel className="font-normal py-2">
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Last request</span>
+              <span className="text-muted-foreground">Last request ~</span>
               <span className="tabular-nums font-medium">{formatCost(lastUsageData.costUsd)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Thread total</span>
+              <span className="text-muted-foreground">Thread total ~</span>
               <span className="tabular-nums font-medium">{formatCost(lastUsageData.threadTotalCostUsd)}</span>
             </div>
           </div>
