@@ -61,10 +61,10 @@ export const ChatHeader: FC<Props> = (props) => {
       </MobileHeader>
 
       {/* Desktop header */}
-      <div className="bg-background border-b hidden md:flex items-center py-2 px-3">
-        <div className="flex items-center min-w-0 w-full max-w-4xl mx-auto">
+      <div className="bg-background border-b hidden md:flex items-center py-2 px-3 overflow-x-auto scrollbar-none">
+        <div className="flex items-center w-full max-w-4xl mx-auto">
           {/* Main content area */}
-          <div className="flex items-center min-w-0 flex-1 gap-2">
+          <div className="flex items-center gap-2">
             {/* Model selector */}
             <div className="shrink-0">
               <ModelSelector
@@ -74,8 +74,8 @@ export const ChatHeader: FC<Props> = (props) => {
               />
             </div>
             
-            {/* Chat thread info - can shrink */}
-            <div className="flex flex-col min-w-0 flex-1">
+            {/* Chat thread info - shrinks first, scrolls if needed */}
+            <div className="flex flex-col min-w-[100px] flex-1">
               <span className="truncate text-base">
                 {props.chatThread.name}
               </span>
