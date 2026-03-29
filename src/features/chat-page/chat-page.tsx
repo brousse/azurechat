@@ -295,6 +295,8 @@ export const ChatPage = (props: ChatPageProps) => {
         <ChatMessages profilePicture={profilePicture} />
 
       <div className="sticky bottom-3 max-w-4xl mx-auto w-full">
+        {/* Fade gradient above input to indicate scrollable content */}
+        <div className="pointer-events-none h-8 -mb-0 bg-gradient-to-t from-background to-transparent -translate-y-full" />
         <PromptInput
           onSubmit={(e) => {
             e.preventDefault();

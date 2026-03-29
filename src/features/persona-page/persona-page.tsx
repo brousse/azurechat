@@ -20,7 +20,7 @@ export const ChatPersonaPage: FC<ChatPersonaProps> = (props) => {
     <ScrollArea className="flex-1">
       <main className="flex flex-1 flex-col">
         <PersonaHero />
-        <div className="container max-w-4xl py-8">
+        <div className="container max-w-4xl py-8 px-4">
           <AgentList
             personas={props.personas}
             initialFavoriteIds={props.initialFavoriteIds}
