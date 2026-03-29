@@ -11,7 +11,6 @@ import { PersonaDetail } from "./persona-detail";
 import { MobileHeader } from "@/features/ui/mobile-header";
 import { ChatReset } from "./chat-reset";
 import { TokenUsageDisplay } from "./token-usage-display";
-import { ContextWindowIndicator } from "./context-window-indicator";
 
 interface Props {
   chatThread: ChatThreadModel;
@@ -31,7 +30,7 @@ export const ChatHeader: FC<Props> = (props) => {
     <>
       {/* Mobile header with hamburger menu */}
       <MobileHeader>
-        <div className="flex items-center min-w-0 flex-1 gap-2">
+        <div className="flex items-center gap-2">
           {/* Model selector */}
           <div className="shrink-0">
             <ModelSelector
@@ -40,16 +39,17 @@ export const ChatHeader: FC<Props> = (props) => {
               disabled={chat.loading !== "idle"}
             />
           </div>
-          
-          {/* Chat thread info - can shrink */}
-          <div className="flex flex-col min-w-0 flex-1">
+
+          {/* Chat thread info - can shrink but not disappear */}
+          <div className="flex flex-col min-w-[80px] max-w-[200px]">
             <span className="truncate text-sm">
               {props.chatThread.name}
             </span>
           </div>
+          <TokenUsageDisplay />
           <ChatReset chatThreadId={props.chatThread.id} disabled={!chat.messages.length} />
 
-          {/* Extension detail - always visible on mobile */}
+          {/* Extension detail */}
           <ExtensionDetail
             disabled={props.chatDocuments.length !== 0}
             extensions={props.extensions}
@@ -61,10 +61,10 @@ export const ChatHeader: FC<Props> = (props) => {
       </MobileHeader>
 
       {/* Desktop header */}
-      <div className="bg-background border-b hidden md:flex items-center py-2 px-3">
-        <div className="flex items-center min-w-0 w-full max-w-4xl mx-auto">
+      <div className="bg-background border-b hidden md:flex items-center py-2 px-3 overflow-x-auto scrollbar-none">
+        <div className="flex items-center w-full max-w-4xl mx-auto">
           {/* Main content area */}
-          <div className="flex items-center min-w-0 flex-1 gap-2">
+          <div className="flex items-center gap-2">
             {/* Model selector */}
             <div className="shrink-0">
               <ModelSelector
@@ -74,8 +74,8 @@ export const ChatHeader: FC<Props> = (props) => {
               />
             </div>
             
-            {/* Chat thread info - can shrink */}
-            <div className="flex flex-col min-w-0 flex-1">
+            {/* Chat thread info - shrinks first, scrolls if needed */}
+            <div className="flex flex-col min-w-[100px] flex-1">
               <span className="truncate text-base">
                 {props.chatThread.name}
               </span>
@@ -85,7 +85,6 @@ export const ChatHeader: FC<Props> = (props) => {
               </span>
             </div>
             <TokenUsageDisplay />
-            <ContextWindowIndicator />
             <ChatReset chatThreadId={props.chatThread.id} disabled={!chat.messages.length} />
 
             {/* Action buttons */}
