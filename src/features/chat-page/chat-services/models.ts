@@ -2,8 +2,11 @@ import { ChatCompletionMessage } from "openai/resources/chat/completions";
 import {
   OpenAIV1Instance,
   OpenAIV1ReasoningInstance,
+  OpenAIV1ImageInstance,
 } from "@/features/common/services/openai";
 import { logError } from "@/features/common/services/logger";
+
+export const DEFAULT_MODEL: ChatModel = "gpt-5.4";
 
 export const CHAT_DOCUMENT_ATTRIBUTE = "CHAT_DOCUMENT";
 export const CHAT_THREAD_ATTRIBUTE = "CHAT_THREAD";
@@ -29,6 +32,12 @@ export type ChatModel =
   | "o4-mini"
   | "computer-use-preview";
 
+export interface ModelPricing {
+  inputPerMillion: number;
+  outputPerMillion: number;
+  cachedInputPerMillion: number;
+}
+
 export interface ModelConfig {
   id: ChatModel;
   name: string;
@@ -41,9 +50,28 @@ export interface ModelConfig {
   supportsComputerUse?: boolean;
   deploymentName?: string;
   defaultReasoningEffort?: ReasoningEffort;
+  pricing: ModelPricing;
+  contextWindow: number;
+  fallbackModel?: ChatModel;
+  dailyTokenLimit?: number;
+  dailyCostLimit?: number;
 }
 
 export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
+  "gpt-5.4": {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    description: "Latest GPT-5.4 model with state-of-the-art capabilities",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT54_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
+    contextWindow: 400000,
+    fallbackModel: "gpt-5.2",
+  },
   "gpt-5.2": {
     id: "gpt-5.2",
     name: "GPT-5.2",
@@ -53,18 +81,38 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsResponsesAPI: true,
     supportsImageGeneration: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT52_DEPLOYMENT_NAME,
-    defaultReasoningEffort: "low"
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-4.1",
   },
-  "gpt-5.4": {
-    id: "gpt-5.4",
-    name: "GPT-5.4",
-    description: "Latest GPT-5.4 model with enhanced reasoning capabilities",
+  "gpt-5.1": {
+    id: "gpt-5.1",
+    name: "GPT-5.1",
+    description: "GPT-5.1 model with strong general capabilities",
     getInstance: () => OpenAIV1ReasoningInstance(),
     supportsReasoning: true,
     supportsResponsesAPI: true,
     supportsImageGeneration: true,
-    deploymentName: process.env.AZURE_OPENAI_API_GPT54_DEPLOYMENT_NAME,
-    defaultReasoningEffort: "low"
+    deploymentName: process.env.AZURE_OPENAI_API_GPT51_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-4.1",
+  },
+  "gpt-5": {
+    id: "gpt-5",
+    name: "GPT-5",
+    description: "GPT-5 base model with advanced capabilities",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT5_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-4.1",
   },
   "gpt-5.3-chat": {
     id: "gpt-5.3-chat",
@@ -74,18 +122,10 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsReasoning: true,
     supportsResponsesAPI: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT53_CHAT_DEPLOYMENT_NAME,
-    defaultReasoningEffort: "medium"
-  },
-  "gpt-5.4": {
-    id: "gpt-5.4",
-    name: "GPT-5.4",
-    description: "Latest GPT-5.4 model with advanced capabilities",
-    getInstance: () => OpenAIV1ReasoningInstance(),
-    supportsReasoning: true,
-    supportsResponsesAPI: true,
-    supportsImageGeneration: true,
-    deploymentName: process.env.AZURE_OPENAI_API_GPT54_DEPLOYMENT_NAME,
-    defaultReasoningEffort: "low"
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 1.50, outputPerMillion: 6.00, cachedInputPerMillion: 0.375 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-4.1",
   },
   "gpt-5.4-mini": {
     id: "gpt-5.4-mini",
@@ -95,8 +135,157 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsReasoning: false,
     supportsResponsesAPI: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT54_MINI_DEPLOYMENT_NAME,
-    defaultReasoningEffort: "medium"
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 0.40, outputPerMillion: 1.60, cachedInputPerMillion: 0.10 },
+    contextWindow: 1047576,
   },
+  "gpt-5-pro": {
+    id: "gpt-5-pro",
+    name: "GPT-5 Pro",
+    description: "Premium GPT-5 model with enhanced performance and extended capabilities",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT5_PRO_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "high",
+    pricing: { inputPerMillion: 10.00, outputPerMillion: 30.00, cachedInputPerMillion: 2.50 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-5",
+  },
+  "gpt-4o": {
+    id: "gpt-4o",
+    name: "GPT-4o",
+    description: "Most capable multimodal model, great for complex tasks",
+    getInstance: () => OpenAIV1Instance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    deploymentName: process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 2.50, outputPerMillion: 10.00, cachedInputPerMillion: 1.25 },
+    contextWindow: 128000,
+    fallbackModel: "gpt-4o-mini",
+  },
+  "gpt-4o-mini": {
+    id: "gpt-4o-mini",
+    name: "GPT-4o Mini",
+    description: "Fast and efficient model for everyday tasks",
+    getInstance: () => OpenAIV1Instance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    deploymentName: process.env.AZURE_OPENAI_API_MINI_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 0.15, outputPerMillion: 0.60, cachedInputPerMillion: 0.075 },
+    contextWindow: 128000,
+  },
+  "gpt-4.1": {
+    id: "gpt-4.1",
+    name: "GPT-4.1",
+    description: "Latest GPT-4.1 model with enhanced capabilities",
+    getInstance: () => OpenAIV1Instance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT41_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-4.1-mini",
+  },
+  "gpt-4.1-mini": {
+    id: "gpt-4.1-mini",
+    name: "GPT-4.1 Mini",
+    description: "Efficient version of GPT-4.1",
+    getInstance: () => OpenAIV1Instance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT41_MINI_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 0.40, outputPerMillion: 1.60, cachedInputPerMillion: 0.10 },
+    contextWindow: 1047576,
+    fallbackModel: "gpt-4.1-nano",
+  },
+  "gpt-4.1-nano": {
+    id: "gpt-4.1-nano",
+    name: "GPT-4.1 Nano",
+    description: "Ultra-fast and lightweight GPT-4.1",
+    getInstance: () => OpenAIV1Instance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT41_NANO_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 0.10, outputPerMillion: 0.40, cachedInputPerMillion: 0.025 },
+    contextWindow: 1047576,
+  },
+  "gpt-image-1": {
+    id: "gpt-image-1",
+    name: "GPT Image 1",
+    description: "Specialized model for image generation and editing",
+    getInstance: () => OpenAIV1ImageInstance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    deploymentName: process.env.AZURE_OPENAI_GPT_IMAGE_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 5.00, outputPerMillion: 15.00, cachedInputPerMillion: 2.50 },
+    contextWindow: 32000,
+  },
+  "o3": {
+    id: "o3",
+    name: "o3 Reasoning",
+    description: "Advanced reasoning model with step-by-step thinking",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    supportedSummarizers: ["detailed", "concise", "auto"],
+    deploymentName: process.env.AZURE_OPENAI_API_O3_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 2.00, outputPerMillion: 8.00, cachedInputPerMillion: 0.50 },
+    contextWindow: 200000,
+    fallbackModel: "o4-mini",
+  },
+  "o3-pro": {
+    id: "o3-pro",
+    name: "o3-Pro",
+    description: "Premium reasoning model with enhanced capabilities and detailed analysis",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    supportedSummarizers: ["detailed", "concise", "auto"],
+    deploymentName: process.env.AZURE_OPENAI_API_O3_PRO_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 20.00, outputPerMillion: 80.00, cachedInputPerMillion: 5.00 },
+    contextWindow: 200000,
+    fallbackModel: "o3",
+  },
+  "o4-mini": {
+    id: "o4-mini",
+    name: "o4-Mini",
+    description: "Efficient reasoning model with detailed summaries",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    supportedSummarizers: ["detailed", "concise", "auto"],
+    deploymentName: process.env.AZURE_OPENAI_API_O4_MINI_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 1.10, outputPerMillion: 4.40, cachedInputPerMillion: 0.275 },
+    contextWindow: 200000,
+  },
+  "computer-use-preview": {
+    id: "computer-use-preview",
+    name: "Computer Use Preview",
+    description: "Experimental model with computer interaction capabilities",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    supportsComputerUse: true,
+    deploymentName: process.env.AZURE_OPENAI_API_COMPUTER_USE_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "medium",
+    pricing: { inputPerMillion: 3.00, outputPerMillion: 12.00, cachedInputPerMillion: 0.75 },
+    contextWindow: 128000,
+  }
 };
 
 /**
@@ -155,8 +344,7 @@ export async function getDefaultModel(): Promise<ChatModel> {
     logError("Error fetching default model", { 
       error: error instanceof Error ? error.message : String(error) 
     });
-    // Fallback to gpt-5.4 if API fails
-    return "gpt-5.4";
+    return DEFAULT_MODEL;
   }
 }
 
@@ -205,6 +393,14 @@ export interface AttachedFileModel {
   uploadedAt?: Date;
 }
 
+export interface ThreadUsage {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCachedTokens: number;
+  totalCostUsd: number;
+  lastUpdated: string;
+}
+
 export interface ChatThreadModel {
   id: string;
   name: string;
@@ -226,6 +422,7 @@ export interface ChatThreadModel {
   codeInterpreterFileIdsSignature?: string;
   attachedFiles?: Array<AttachedFileModel>;
   subAgentIds?: string[];
+  usage?: ThreadUsage;
 }
 
 export interface UserPrompt {
@@ -310,6 +507,36 @@ export type AzureChatCompletionReasoning = {
   response: string;
 };
 
+export interface UsageDataResponse {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  threadTotalCostUsd: number;
+  threadTotalTokens: number;
+  contextWindowSize: number;
+  contextUsagePercent: number;
+  model: string;
+}
+
+export type AzureChatCompletionUsageData = {
+  type: "usageData";
+  response: UsageDataResponse;
+};
+
+export type AzureChatCompletionUsageWarning = {
+  type: "usageWarning";
+  response: {
+    message: string;
+    originalModel: string;
+    fallbackModel: string;
+    limitType: "tokens" | "cost";
+    currentUsage: number;
+    limit: number;
+  };
+};
+
 export type AzureChatCompletion =
   | AzureChatCompletionError
   | AzureChatCompletionFunctionCall
@@ -317,7 +544,9 @@ export type AzureChatCompletion =
   | AzureChatCompletionContent
   | AzureChatCompletionFinalContent
   | AzureChatCompletionAbort
-  | AzureChatCompletionReasoning;
+  | AzureChatCompletionReasoning
+  | AzureChatCompletionUsageData
+  | AzureChatCompletionUsageWarning;
 
 // https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/read?view=doc-intel-4.0.0&tabs=sample-code#input-requirements-v4
 export enum SupportedFileExtensionsDocumentIntellicence {
