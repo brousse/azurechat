@@ -115,7 +115,7 @@ export const FileChips = ({ chatDocuments }: FileChipsProps) => {
               <img src={img} alt={`Attached ${idx + 1}`} className="w-full h-full object-cover" />
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="text-sm font-medium truncate max-w-[150px]">Bild</span>
+              <span className="text-sm font-medium truncate max-w-[150px]">{`Bild ${idx + 1}`}</span>
               <span className="text-xs text-muted-foreground">Bild</span>
             </div>
           </div>

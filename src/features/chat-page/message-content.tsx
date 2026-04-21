@@ -61,9 +61,11 @@ const MessageContent: React.FC<MessageContentProps> = ({ message }) => {
           content={message.content}
           onCitationClick={CitationAction}
         ></Markdown>
-        {(message.multiModalImages && message.multiModalImages.length > 0 ? message.multiModalImages : message.multiModalImage ? [message.multiModalImage] : []).length > 0 && (
+        {(() => {
+          const images = message.multiModalImages?.length ? message.multiModalImages : message.multiModalImage ? [message.multiModalImage] : [];
+          return images.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-2">
-            {(message.multiModalImages && message.multiModalImages.length > 0 ? message.multiModalImages : [message.multiModalImage!]).map((imgUrl, imgIdx) => (
+            {images.map((imgUrl, imgIdx) => (
               <ChatImageDisplay 
                 key={imgIdx}
                 imageUrl={imgUrl} 
@@ -72,7 +74,8 @@ const MessageContent: React.FC<MessageContentProps> = ({ message }) => {
               />
             ))}
           </div>
-        )}
+        ) : null;
+        })()}
       </>
     );
   }

@@ -80,13 +80,16 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
             <Message key={m.id} from={role}>
               <div className="flex flex-col gap-0.5 w-full">
                 <MessageContent>
-                {(m.multiModalImages && m.multiModalImages.length > 0 ? m.multiModalImages : m.multiModalImage ? [m.multiModalImage] : []).length > 0 && (
+                {(() => {
+                  const images = m.multiModalImages?.length ? m.multiModalImages : m.multiModalImage ? [m.multiModalImage] : [];
+                  return images.length > 0 ? (
                   <div className="mb-4 flex flex-wrap gap-2">
-                    {(m.multiModalImages && m.multiModalImages.length > 0 ? m.multiModalImages : [m.multiModalImage!]).map((imgUrl, imgIdx) => (
+                    {images.map((imgUrl, imgIdx) => (
                       <ChatImageDisplay key={imgIdx} imageUrl={imgUrl} className="max-w-[300px] rounded-lg" />
                     ))}
                   </div>
-                )}
+                ) : null;
+                })()}
                 {m.reasoningContent && m.role === 'assistant' && (
                   <Reasoning isStreaming={reasoningMeta.isStreaming} defaultOpen>
                     <ReasoningTrigger>
