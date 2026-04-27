@@ -54,7 +54,7 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     supportsImageGeneration: true,
     deploymentName: process.env.AZURE_OPENAI_API_GPT55_DEPLOYMENT_NAME,
     defaultReasoningEffort: "low",
-    pricing: { inputPerMillion: 2.50, outputPerMillion: 15.00, cachedInputPerMillion: 0.25 },
+    pricing: { inputPerMillion: 5, outputPerMillion: 30.00, cachedInputPerMillion: 0.5 },
     contextWindow: 1050000,
     fallbackModel: "gpt-5.4-mini",
   },
