@@ -5,7 +5,7 @@ import {
 } from "@/features/common/services/openai";
 import { logError } from "@/features/common/services/logger";
 
-export const DEFAULT_MODEL: ChatModel = "gpt-5.4";
+export const DEFAULT_MODEL: ChatModel = "gpt-5.5";
 
 export const CHAT_DOCUMENT_ATTRIBUTE = "CHAT_DOCUMENT";
 export const CHAT_THREAD_ATTRIBUTE = "CHAT_THREAD";
@@ -13,6 +13,7 @@ export const MESSAGE_ATTRIBUTE = "CHAT_MESSAGE";
 export const CHAT_CITATION_ATTRIBUTE = "CHAT_CITATION";
 
 export type ChatModel =
+  | "gpt-5.5"
   | "gpt-5.4"
   | "gpt-5.4-mini"
   | "gpt-5.3-chat";
@@ -43,6 +44,20 @@ export interface ModelConfig {
 }
 
 export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
+  "gpt-5.5": {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    description: "Latest GPT-5.5 model with state-of-the-art capabilities",
+    getInstance: () => OpenAIV1ReasoningInstance(),
+    supportsReasoning: true,
+    supportsResponsesAPI: true,
+    supportsImageGeneration: true,
+    deploymentName: process.env.AZURE_OPENAI_API_GPT55_DEPLOYMENT_NAME,
+    defaultReasoningEffort: "low",
+    pricing: { inputPerMillion: 2.50, outputPerMillion: 15.00, cachedInputPerMillion: 0.25 },
+    contextWindow: 1050000,
+    fallbackModel: "gpt-5.4-mini",
+  },
   "gpt-5.4": {
     id: "gpt-5.4",
     name: "GPT-5.4",

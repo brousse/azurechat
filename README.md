@@ -104,6 +104,7 @@ Configure which models appear in your chat interface by setting environment vari
 
 ```bash
 # Enable specific models in .env.local
+AZURE_OPENAI_API_GPT55_DEPLOYMENT_NAME=gpt55-deployment
 AZURE_OPENAI_API_O3_DEPLOYMENT_NAME=o3-deployment
 AZURE_OPENAI_API_O3_PRO_DEPLOYMENT_NAME=o3-pro-deployment
 AZURE_OPENAI_API_GPT41_DEPLOYMENT_NAME=gpt41-deployment
