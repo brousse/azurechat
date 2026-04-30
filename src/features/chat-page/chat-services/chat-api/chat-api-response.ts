@@ -18,6 +18,7 @@ import {
 } from "./function-registry";
 import { OpenAIResponsesStream } from "./openai-responses-stream";
 import { createConversationState, startConversation, continueConversation, ConversationState } from "./conversation-manager";
+import { buildSystemMessage, isoDate, sortFunctionTools } from "./prompt-builder";
 import { FindAllExtensionForCurrentUserAndIds, FindSecureHeaderValue } from "@/features/extensions-page/extension-services/extension-service";
 import { reportUserChatMessage } from "@/features/common/services/chat-metrics-service";
 import { CheckLimits } from "@/features/common/services/usage-service";
@@ -121,8 +122,14 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
     documentHint = `\n\n${contextLine}\n\nMANDATORY BEHAVIOR WHEN DOCUMENTS ARE PRESENT:\n- You MUST first call the search_documents tool with the user's question as the query before composing an answer.\n- If the first page is insufficient, iterate using top (max results, default 10) and skip (offset) to gather more context (e.g., top=10, skip=10 for page 2).\n- Ground your answer in the retrieved content and cite filenames when relevant.\n- Do not answer purely from prior knowledge when documents are attached.`;
   }
 
-  // Update system prompt with current date and document hint
-  currentChatThread.personaMessage = `${CHAT_DEFAULT_SYSTEM_PROMPT} \n\nToday's Date: ${new Date().toLocaleDateString()}${documentHint}\n\n${currentChatThread.personaMessage}`;
+  // Build the system message via a pure helper so the byte-for-byte stability
+  // of the prompt prefix is locked down by prompt-builder.test.ts.
+  currentChatThread.personaMessage = buildSystemMessage({
+    staticSystemPrompt: CHAT_DEFAULT_SYSTEM_PROMPT,
+    personaMessage: currentChatThread.personaMessage,
+    today: isoDate(),
+    documentHint,
+  });
 
   // Save user message
   await CreateChatMessage({
@@ -265,13 +272,21 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
 
   let codeInterpreterTool = buildCodeInterpreterTool(true);
 
+  // Sort function-typed tools by name so the tools array is identical across
+  // requests regardless of the order conditional branches/extensions registered them in.
+  // The fixed-position type-only tools (image_generation, web_search_preview, code_interpreter)
+  // are appended after, in a deterministic order.
+  const sortedTools = sortFunctionTools(tools);
+
   // Create request options for Responses API
   const requestOptions: any = {
     model: modelConfig.deploymentName,
     stream: true,
     store: false,
+    // Pin requests for the same thread to the same cache partition.
+    prompt_cache_key: currentChatThread.id,
     tools: [
-      ...tools, 
+      ...sortedTools,
       ...(props.imageGenerationEnabled ? [{ type: "image_generation" }] : []),
       ...(props.webSearchEnabled ? [{ type: "web_search_preview" }] : []),
       ...(codeInterpreterTool ? [codeInterpreterTool] : [])
@@ -281,7 +296,7 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
   };
   // Add a strong hint to prefer using available tools/extensions
   try {
-    const preferredToolNames = tools
+    const preferredToolNames = sortedTools
       .map((t: any) => t?.name)
       .filter((n: string | undefined) => !!n);
 
@@ -375,7 +390,7 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
       
       // Update the tools in requestOptions
       requestOptions.tools = [
-        ...tools, 
+        ...sortedTools,
         ...(props.imageGenerationEnabled ? [{ type: "image_generation" }] : []),
         ...(props.webSearchEnabled ? [{ type: "web_search_preview" }] : []),
         ...(codeInterpreterTool ? [codeInterpreterTool] : [])
