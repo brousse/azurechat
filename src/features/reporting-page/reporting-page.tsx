@@ -35,7 +35,7 @@ export const ChatReportingPage: FC<ChatReportingProps> = async (props) => {
   );
 };
 
-async function ReportingContent(props: ChatReportingProps) {
+export async function ReportingContent(props: ChatReportingProps) {
   let pageNumber = props.page < 0 ? 0 : props.page;
   let nextPage = pageNumber + 1;
   let previousPage = pageNumber - 1;
