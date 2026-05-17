@@ -37,12 +37,9 @@ export default defineConfig({
         "__tests__/**",
         "e2e/**",
       ],
-      thresholds: {
-        statements: 100,
-        functions: 100,
-        branches: 95,
-        lines: 100,
-      },
+      // Coverage is informational; no hard threshold. The rollup script in
+      // __tests__/coverage-rollup.mjs can enforce a gate when
+      // COVERAGE_GATE is set in the workflow env.
     },
     server: {
       deps: {
