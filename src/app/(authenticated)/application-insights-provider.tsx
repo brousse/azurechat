@@ -5,13 +5,13 @@ import { initializeTelemetry } from './application-insights-service'
 import { useSession } from 'next-auth/react'
 
 export default function ApplicationInsightsProvider({
-  instrumentationKey,  
+  connectionString,
   children,
 }: {
-    instrumentationKey: string,
+    connectionString: string,
     children: React.ReactNode
 }) {
   const session = useSession()
-  const { reactPlugin } = initializeTelemetry(instrumentationKey, session)
+  const { reactPlugin } = initializeTelemetry(connectionString, session)
   return <AppInsightsContext.Provider value={reactPlugin}>{children}</AppInsightsContext.Provider>
 }

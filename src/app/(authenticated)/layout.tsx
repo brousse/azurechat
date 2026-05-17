@@ -21,12 +21,18 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   noStore();
-  const instrumentationKey = process.env.APPINSIGHTS_INSTRUMENTATIONKEY || "";
+  // Same opt-in gate as the server SDK in instrumentation.ts. Connection
+  // string flows to the browser via the client component below; the
+  // iKey portion is already public (it's in every telemetry payload).
+  const telemetryEnabled = process.env.AZURECHAT_TELEMETRY === "1";
+  const connectionString = telemetryEnabled
+    ? (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING || "")
+    : "";
   const user = await getCurrentUser();
-  
+
   return (
     <AuthenticatedProviders>
-      <ApplicationInsightsProvider instrumentationKey={instrumentationKey}>
+      <ApplicationInsightsProvider connectionString={connectionString}>
         <div className={cn("flex flex-1 items-stretch overflow-hidden")}>
           <MainMenu user={user} />
           <div className="flex-1 flex min-w-0 overflow-hidden">{children}</div>
