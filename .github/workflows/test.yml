@@ -1,0 +1,92 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: Unit tests + coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./src
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Run vitest with coverage
+        run: npm run test:coverage
+
+      - name: Roll up coverage by feature area
+        run: node __tests__/coverage-rollup.mjs
+        env:
+          COVERAGE_GATE: "100"
+
+      - name: Upload coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: src/coverage/
+
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./src
+    env:
+      NEXTAUTH_SECRET: ci-nextauth-secret-do-not-use-in-prod
+      NEXTAUTH_URL: http://localhost:3000
+      AZURE_COSMOSDB_URI: https://cosmos.test.local
+      AZURE_COSMOSDB_KEY: test-key
+      AZURE_COSMOSDB_DB_NAME: chat
+      AZURE_COSMOSDB_CONTAINER_NAME: history
+      AZURE_COSMOSDB_CONFIG_CONTAINER_NAME: config
+      AZURE_SEARCH_API_KEY: test-search-key
+      AZURE_SEARCH_NAME: test-search
+      AZURE_SEARCH_INDEX_NAME: test-index
+      AZURE_OPENAI_API_KEY: test-openai-key
+      AZURE_OPENAI_API_INSTANCE_NAME: test-instance
+      AZURE_OPENAI_API_DEPLOYMENT_NAME: gpt-test
+      AZURE_OPENAI_API_VERSION: "2024-10-21"
+      AZURE_KEY_VAULT_NAME: test-kv
+      AZURE_STORAGE_ACCOUNT_NAME: teststorage
+      AZURE_STORAGE_ACCOUNT_KEY: test-storage-key
+      ADMIN_EMAIL_ADDRESS: admin@test.local
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        run: npx playwright test --project=chromium
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: src/playwright-report/
