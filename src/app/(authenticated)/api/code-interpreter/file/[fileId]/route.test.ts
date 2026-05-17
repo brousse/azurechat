@@ -1,0 +1,191 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
+
+vi.mock("@/features/chat-page/chat-services/code-interpreter-service", () => ({
+  DownloadFileFromCodeInterpreter: vi.fn(),
+  DeleteFileFromCodeInterpreter: vi.fn(),
+}));
+
+vi.mock("@/features/auth-page/helpers", () => ({
+  getCurrentUser: vi.fn(),
+}));
+
+vi.mock("@/features/common/services/logger", () => ({
+  logError: vi.fn(),
+  logInfo: vi.fn(),
+  logDebug: vi.fn(),
+}));
+
+import { DownloadFileFromCodeInterpreter, DeleteFileFromCodeInterpreter } from "@/features/chat-page/chat-services/code-interpreter-service";
+import { getCurrentUser } from "@/features/auth-page/helpers";
+import { GET, DELETE } from "./route";
+
+const mockedDownload = DownloadFileFromCodeInterpreter as ReturnType<typeof vi.fn>;
+const mockedDelete = DeleteFileFromCodeInterpreter as ReturnType<typeof vi.fn>;
+const mockedGetCurrentUser = getCurrentUser as ReturnType<typeof vi.fn>;
+
+const defaultUser = {
+  name: "Test User",
+  email: "test@example.com",
+  isAdmin: false,
+  token: "tok",
+  image: "",
+  isLocalDevUser: false,
+};
+
+function makeGetRequest(fileId: string) {
+  return new NextRequest(`http://localhost/api/code-interpreter/file/${fileId}`);
+}
+
+function makeDeleteRequest(fileId: string) {
+  return new NextRequest(`http://localhost/api/code-interpreter/file/${fileId}`, { method: "DELETE" });
+}
+
+describe("/api/code-interpreter/file/[fileId] route", () => {
+  beforeEach(() => {
+    mockedDownload.mockReset();
+    mockedDelete.mockReset();
+    mockedGetCurrentUser.mockReset();
+    mockedGetCurrentUser.mockResolvedValue(defaultUser);
+  });
+
+  // api.unit.ci-file.001
+  it("GET returns file bytes with content-type", async () => {
+    const data = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    mockedDownload.mockResolvedValue({
+      status: "OK",
+      response: { data, name: "chart.png", contentType: "image/png" },
+    });
+
+    const req = makeGetRequest("file123");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "file123" }) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/png");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(bytes).toEqual(new Uint8Array(data));
+  });
+
+  // api.unit.ci-file.002
+  it("GET returns 404 when download fails", async () => {
+    mockedDownload.mockResolvedValue({
+      status: "ERROR",
+      errors: [{ message: "file not found" }],
+    });
+
+    const req = makeGetRequest("badfile");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "badfile" }) });
+
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect(text).toMatch(/file not found/i);
+  });
+
+  // api.unit.ci-file.003 — streams large file (5MB buffer)
+  it("streams large file with matching byte length", async () => {
+    const bigData = Buffer.alloc(5 * 1024 * 1024, 0xaa);
+    mockedDownload.mockResolvedValue({
+      status: "OK",
+      response: { data: bigData, name: "large.bin", contentType: "application/octet-stream" },
+    });
+
+    const req = makeGetRequest("largefile");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "largefile" }) });
+
+    expect(res.status).toBe(200);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(bytes.length).toBe(bigData.length);
+  });
+
+  // api.unit.ci-file.004 — GET 401 when no session
+  it("GET returns 401 when user is not authenticated", async () => {
+    mockedGetCurrentUser.mockResolvedValue(null);
+    const req = makeGetRequest("file123");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(401);
+    expect(await res.text()).toMatch(/Unauthorized/i);
+  });
+
+  // api.unit.ci-file.005 — GET 400 when fileId is empty string
+  it("GET returns 400 when fileId is empty", async () => {
+    const req = makeGetRequest("");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "" }) });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/File ID is required/i);
+  });
+
+  // api.unit.ci-file.006 — GET 500 on downstream throw
+  it("GET returns 500 when DownloadFileFromCodeInterpreter throws", async () => {
+    mockedDownload.mockRejectedValue(new Error("network error"));
+    const req = makeGetRequest("file123");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(500);
+    expect(await res.text()).toMatch(/Internal Server Error/i);
+  });
+
+  // DELETE handler tests
+
+  // api.unit.ci-file.007 — DELETE happy path
+  it("DELETE returns 200 with {success:true} on successful deletion", async () => {
+    mockedDelete.mockResolvedValue({ status: "OK", response: {} });
+    const req = makeDeleteRequest("file123");
+    const res = await DELETE(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(await res.text());
+    expect(body).toEqual({ success: true });
+  });
+
+  // api.unit.ci-file.008 — DELETE 401 when no session
+  it("DELETE returns 401 when user is not authenticated", async () => {
+    mockedGetCurrentUser.mockResolvedValue(null);
+    const req = makeDeleteRequest("file123");
+    const res = await DELETE(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(401);
+    expect(await res.text()).toMatch(/Unauthorized/i);
+  });
+
+  // api.unit.ci-file.009 — DELETE 400 when fileId is empty
+  it("DELETE returns 400 when fileId is empty", async () => {
+    const req = makeDeleteRequest("");
+    const res = await DELETE(req, { params: Promise.resolve({ fileId: "" }) });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/File ID is required/i);
+  });
+
+  // api.unit.ci-file.010 — DELETE service ERROR → 500
+  it("DELETE returns 500 when deletion service returns ERROR", async () => {
+    mockedDelete.mockResolvedValue({
+      status: "ERROR",
+      errors: [{ message: "delete failed" }],
+    });
+    const req = makeDeleteRequest("file123");
+    const res = await DELETE(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(500);
+    expect(await res.text()).toMatch(/delete failed/i);
+  });
+
+  // api.unit.ci-file.011 — DELETE throws → 500
+  it("DELETE returns 500 when DeleteFileFromCodeInterpreter throws", async () => {
+    mockedDelete.mockRejectedValue(new Error("unexpected error"));
+    const req = makeDeleteRequest("file123");
+    const res = await DELETE(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(500);
+    expect(await res.text()).toMatch(/Internal Server Error/i);
+  });
+
+  // api.unit.ci-file.012 — GET non-Error throw → covers String(error) branch
+  it("GET returns 500 on non-Error throw (covers String(error) branch)", async () => {
+    mockedDownload.mockRejectedValue("raw string error");
+    const req = makeGetRequest("file123");
+    const res = await GET(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(500);
+  });
+
+  // api.unit.ci-file.013 — DELETE non-Error throw → covers String(error) branch
+  it("DELETE returns 500 on non-Error throw (covers String(error) branch)", async () => {
+    mockedDelete.mockRejectedValue("raw string error");
+    const req = makeDeleteRequest("file123");
+    const res = await DELETE(req, { params: Promise.resolve({ fileId: "file123" }) });
+    expect(res.status).toBe(500);
+  });
+});
