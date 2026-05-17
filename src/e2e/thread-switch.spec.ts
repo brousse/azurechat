@@ -11,8 +11,12 @@ test.describe("thread-switch", () => {
     await page.goto("/chat");
 
     // Thread A
-    await page.getByRole("button", { name: /new chat/i }).first().click();
-    await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 30_000 });
+    const firstNewChat = page.getByRole("button", { name: /new chat/i }).first();
+    await expect(firstNewChat).toBeEnabled({ timeout: 10_000 });
+    await firstNewChat.click();
+    await expect
+      .poll(() => page.url(), { timeout: 45_000, intervals: [200, 400, 800, 1000] })
+      .toMatch(/\/chat\/[^/]+$/);
     const threadAUrl = page.url();
     const threadAId = threadAUrl.split("/").pop()!;
 

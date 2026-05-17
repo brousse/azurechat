@@ -20,8 +20,14 @@ test.describe("rename-delete-thread", () => {
     });
 
     await page.goto("/chat");
-    await page.getByRole("button", { name: /new chat/i }).first().click();
-    await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 30_000 });
+    const newChatButton = page.getByRole("button", { name: /new chat/i }).first();
+    await expect(newChatButton).toBeEnabled({ timeout: 10_000 });
+    await newChatButton.click();
+    // Poll the URL: the server-action redirect can land just after the click
+    // returns and CI cold-start sometimes misses the navigation event.
+    await expect
+      .poll(() => page.url(), { timeout: 45_000, intervals: [200, 400, 800, 1000] })
+      .toMatch(/\/chat\/[^/]+$/);
     const threadUrl = page.url();
     const threadId = threadUrl.split("/").pop()!;
 

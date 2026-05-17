@@ -13,8 +13,12 @@ test.describe("persisted-multi-turn", () => {
 
     // The New Chat button lives inside `<form action={CreateChatAndRedirect}>`
     // (chat-menu-header.tsx). Submitting redirects to /chat/<new-id>.
-    await page.getByRole("button", { name: /new chat/i }).first().click();
-    await page.waitForURL(/\/chat\/[^/]+$/, { timeout: 30_000 });
+    const newChatButton = page.getByRole("button", { name: /new chat/i }).first();
+    await expect(newChatButton).toBeEnabled({ timeout: 10_000 });
+    await newChatButton.click();
+    await expect
+      .poll(() => page.url(), { timeout: 45_000, intervals: [200, 400, 800, 1000] })
+      .toMatch(/\/chat\/[^/]+$/);
     const threadUrl = page.url();
 
     const textarea = page.getByPlaceholder("Type your message...");
