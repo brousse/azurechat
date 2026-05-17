@@ -21,9 +21,15 @@ vi.mock("@/features/common/services/azure-default-credential", () => ({
 }));
 
 describe("common.unit.cosmos — container wiring", () => {
-  beforeEach(() => {
-    // Reset module registry so each test gets a fresh singleton
+  beforeEach(async () => {
+    // Reset module registry so each test gets a fresh singleton.
     vi.resetModules();
+    // The service container stores registry + singletons on globalThis to
+    // survive Turbopack chunk duplication; module reset alone doesn't clear
+    // them. Reset explicitly so cosmos.ts re-registers its production factory
+    // and the CosmosClient mock gets re-invoked.
+    const { reset } = await import("./service-container");
+    reset();
     mockCosmosClientConstructor.mockClear();
     mockContainerFn.mockClear();
     mockDatabaseFn.mockClear();

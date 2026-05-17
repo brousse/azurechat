@@ -18,8 +18,13 @@ vi.mock("./azure-default-credential", () => ({
 }));
 
 describe("common.unit.openai — OpenAIInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -62,8 +67,13 @@ describe("common.unit.openai — OpenAIInstance", () => {
 });
 
 describe("common.unit.openai — OpenAIV1Instance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -87,8 +97,13 @@ describe("common.unit.openai — OpenAIV1Instance", () => {
 });
 
 describe("common.unit.openai — OpenAIMiniInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -112,8 +127,13 @@ describe("common.unit.openai — OpenAIMiniInstance", () => {
 });
 
 describe("common.unit.openai — OpenAIEmbeddingInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -137,8 +157,13 @@ describe("common.unit.openai — OpenAIEmbeddingInstance", () => {
 });
 
 describe("common.unit.openai — OpenAIVisionInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -165,8 +190,13 @@ describe("common.unit.openai — OpenAIVisionInstance", () => {
 });
 
 describe("common.unit.openai — OpenAIReasoningInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -190,8 +220,13 @@ describe("common.unit.openai — OpenAIReasoningInstance", () => {
 });
 
 describe("common.unit.openai — OpenAIV1ReasoningInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
@@ -232,8 +267,13 @@ describe("common.unit.openai — OpenAIV1ReasoningInstance", () => {
 });
 
 describe("common.unit.openai — OpenAIV1ImageInstance", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Clear the service-container globals so openai.ts re-registers its
+    // production factories on the next import and MockAzureOpenAI gets
+    // re-invoked instead of returning a cached singleton.
+    const { reset } = await import("./service-container");
+    reset();
     MockAzureOpenAI.mockClear();
   });
 
