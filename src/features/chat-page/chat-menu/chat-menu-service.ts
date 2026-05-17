@@ -14,6 +14,14 @@ import { ChatThreadModel } from "../chat-services/models";
 
 export const DeleteChatThreadByID = async (chatThreadID: string) => {
   await SoftDeleteChatThreadForCurrentUser(chatThreadID);
+  // The (chat) layout fetches the thread list — invalidate it so the deleted
+  // row disappears immediately. Without this, the RSC redirect lands on /chat
+  // but the parent layout's cached payload still includes the deleted thread
+  // until a hard reload.
+  RevalidateCache({
+    page: "chat",
+    type: "layout",
+  });
   redirect("/chat");
 };
 

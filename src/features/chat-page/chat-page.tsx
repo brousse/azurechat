@@ -68,7 +68,11 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
             </div>
           </div>
         )}
-        {messages.map((m, mIndex) => {
+        {messages.filter((m) => m.role !== 'tool' && m.role !== 'function').map((m, mIndex) => {
+          // Tool/function role messages (both streamed via chat-store and reloaded
+          // from Cosmos) are surfaced through `toolCallHistory` on their
+          // assistant message — rendering them as their own bubble produces an
+          // empty card here because the new chat surface has no tool-role view.
           const role = (m.role === 'user' || m.role === 'assistant' || m.role === 'system') ? m.role : 'assistant';
           const avatarSrc = role === 'user'
             ? (profilePicture || '/user-icon.png')

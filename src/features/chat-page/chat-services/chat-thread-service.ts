@@ -26,6 +26,7 @@ import {
   AttachedFileModel,
 } from "./models";
 import { redirect } from "next/navigation";
+import { RevalidateCache } from "@/features/common/navigation-helpers";
 import { ChatApiText } from "./chat-api/chat-api-text";
 
 export const FindAllChatThreadForCurrentUser = async (): Promise<
@@ -254,17 +255,22 @@ export const EnsureChatThreadOperation = async (
   chatThreadID: string
 ): Promise<ServerActionResponse<ChatThreadModel>> => {
   const response = await FindChatThreadForCurrentUser(chatThreadID);
-  // check access to Persona documents
+
+  if (response.status !== "OK") {
+    return response;
+  }
+
   const currentUser = await getCurrentUser();
   const hashedId = await userHashedId();
 
-  if (response.status === "OK") {
-    if (currentUser.isAdmin || response.response.userId === hashedId) {
-      return response;
-    }
+  if (currentUser.isAdmin || response.response.userId === hashedId) {
+    return response;
   }
 
-  return response;
+  return {
+    status: "UNAUTHORIZED",
+    errors: [{ message: "You are not authorized to access this chat thread." }],
+  };
 };
 
 export const AddExtensionToChatThread = async (props: {
@@ -612,6 +618,13 @@ export const UpdateChatThreadUsage = async (
 export const CreateChatAndRedirect = async () => {
   const response = await CreateChatThread();
   if (response.status === "OK") {
+    // Invalidate the (chat) layout so the sidebar's thread list includes the
+    // new thread on the redirect target — without this, the client's RSC
+    // router cache can serve a stale sidebar that omits the newly-created row.
+    RevalidateCache({
+      page: "chat",
+      type: "layout",
+    });
     redirect(`/chat/${response.response.id}`);
   }
 };
