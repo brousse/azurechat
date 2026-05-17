@@ -39,10 +39,17 @@ jobs:
 
       - name: 📂 Copy standalone into the root
         run: |
-          # Create site-deploy directory
+          # Next picks the workspace root for the standalone output by walking
+          # up for the first lockfile. The repo previously had a (stale) root
+          # package-lock.json, which made the standalone output nest under
+          # `standalone/src/`. With only `src/package-lock.json` left, the
+          # standalone bundle now sits directly under `build/standalone/`.
           mkdir -p ./site-deploy
-          # Copy everything from standalone/src (server.js, build, node_modules, package.json, etc.)
-          cp -R ./src/build/standalone/src/* ./site-deploy/
+          if [ -d ./src/build/standalone/src ]; then
+            cp -R ./src/build/standalone/src/* ./site-deploy/
+          else
+            cp -R ./src/build/standalone/* ./site-deploy/
+          fi
 
       - name: 📂 Copy static and public folders into standalone
         run: |
