@@ -1,45 +1,27 @@
 import { CosmosClient } from "@azure/cosmos";
-import { getAzureDefaultCredential } from "./azure-default-credential";
+import { register, resolve, has, SERVICE_KEYS } from "./service-container";
+import { createProductionCosmosClient } from "./cosmos.production";
 
-// Read Cosmos DB_NAME and CONTAINER_NAME from .env
 const DB_NAME = process.env.AZURE_COSMOSDB_DB_NAME || "chat";
 const CONTAINER_NAME = process.env.AZURE_COSMOSDB_CONTAINER_NAME || "history";
 const CONFIG_CONTAINER_NAME =
   process.env.AZURE_COSMOSDB_CONFIG_CONTAINER_NAME || "config";
 
-let client: CosmosClient | null = null;
+// Register the production factory once on module load if no binding has been
+// supplied yet (e.g. by instrumentation.ts in test mode). Tests / e2e wiring
+// register a stub BEFORE this module is imported, so this branch is a no-op
+// there.
+if (!has(SERVICE_KEYS.cosmos)) {
+  register(SERVICE_KEYS.cosmos, createProductionCosmosClient);
+}
 
-export const CosmosInstance = () => {
-  if (client) {
-    return client;
-  }
-
-  const endpoint = process.env.AZURE_COSMOSDB_URI;
-
-  if (!endpoint) {
-    throw new Error(
-      "Azure Cosmos DB endpoint is not configured. Please configure it in the .env file."
-    );
-  }
-
-  client = new CosmosClient({
-    endpoint,
-    aadCredentials: getAzureDefaultCredential(),
-  });
-
-  return client;
-};
+export const CosmosInstance = (): CosmosClient =>
+  resolve<CosmosClient>(SERVICE_KEYS.cosmos);
 
 export const ConfigContainer = () => {
-  const client = CosmosInstance();
-  const database = client.database(DB_NAME);
-  const container = database.container(CONFIG_CONTAINER_NAME);
-  return container;
+  return CosmosInstance().database(DB_NAME).container(CONFIG_CONTAINER_NAME);
 };
 
 export const HistoryContainer = () => {
-  const client = CosmosInstance();
-  const database = client.database(DB_NAME);
-  const container = database.container(CONTAINER_NAME);
-  return container;
+  return CosmosInstance().database(DB_NAME).container(CONTAINER_NAME);
 };
