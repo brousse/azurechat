@@ -1,16 +1,19 @@
 name: Build & deploy Next.js app to Azure Web App
 
-# When this action will be executed
+# Runs only after the Tests workflow finishes successfully on main. This
+# gates every deploy (dev + prod) on vitest + Playwright green. Manual
+# dispatch stays available for hotfix / re-deploy scenarios.
 on:
-  # Automatically trigger it when detected changes in repo
-  push:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
     branches: [main]
-
-  # Allow manual workflow trigger
   workflow_dispatch:
 
 jobs:
   build:
+    # Only proceed when triggered by a successful Tests run (or manually).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
