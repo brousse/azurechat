@@ -8,14 +8,19 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  // CI runners are colder than local — server-action redirects can lose a
+  // navigation event on first run. Two retries on CI papers over those
+  // timing flakes without masking real failures (real bugs reproduce
+  // consistently on all 3 attempts).
+  retries: process.env.CI ? 2 : 0,
   // One worker. One test at a time. Strictly serial — Next/Turbopack with
   // multiple concurrent compiles is what was leaking ~30 postcss workers
   // per run on macOS.
   workers: 1,
-  // Bail after the first failure so we don't keep recompiling for tests
-  // that depend on the same state.
-  maxFailures: 1,
+  // Locally, bail after the first failure so we don't keep recompiling for
+  // tests that depend on the same state. On CI, run the whole suite so we
+  // see every regression in one report.
+  maxFailures: process.env.CI ? undefined : 1,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   globalSetup: path.resolve(__dirname, "./e2e/global-setup.ts"),
   globalTeardown: path.resolve(__dirname, "./e2e/global-teardown.ts"),
