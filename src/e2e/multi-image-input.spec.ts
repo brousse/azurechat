@@ -98,6 +98,34 @@ test.describe("multi-image input", () => {
     await expect(hiddenImageInputs(page)).toHaveCount(2);
   });
 
+  test("submitting a pasted image renders it inside the resulting user message bubble", async ({ page }) => {
+    await openComposer(page);
+
+    await pasteImage(page, "submitted.png");
+    await expect(previewImages(page)).toHaveCount(1);
+
+    await page.getByPlaceholder("Type your message...").fill("look at this");
+    await page.locator('form button[type="submit"]').click();
+
+    // The optimistic user-message bubble carries the `is-user` class. After
+    // submit, the preview chips reset and the image is re-rendered inside
+    // the message bubble itself.
+    const userBubbleImage = page.locator(".is-user img").first();
+    await expect(userBubbleImage).toBeVisible({ timeout: 10_000 });
+
+    // The src must resolve to something renderable — either the original
+    // base64 data URL (optimistic path) or the persisted /api/images URL
+    // (after reload). Both prove the image survived the submit.
+    const src = await userBubbleImage.getAttribute("src");
+    expect(src).toMatch(/^(data:image\/|\/api\/images\?|blob:)/);
+
+    // The browser actually painted pixels for it.
+    const box = await userBubbleImage.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.height).toBeGreaterThan(0);
+  });
+
   test("inline message-bubble images render at the fixed thumbnail width even for tiny natural sizes", async ({ page }) => {
     await openComposer(page);
 
