@@ -88,7 +88,7 @@ class FileStore {
         reader.readAsDataURL(file);
         reader.onload = () => {
           if (typeof reader.result === "string") {
-            InputImageStore.UpdateBase64Image(reader.result);
+            InputImageStore.AddImage(reader.result);
           }
         };
         chatStore.updateLoading("idle");
