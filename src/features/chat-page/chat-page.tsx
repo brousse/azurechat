@@ -85,7 +85,9 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
                   return images.length > 0 ? (
                   <div className="mb-4 flex flex-wrap gap-2">
                     {images.map((imgUrl, imgIdx) => (
-                      <ChatImageDisplay key={imgIdx} imageUrl={imgUrl} className="max-w-[300px] rounded-lg" />
+                      <div key={imgIdx} className="w-[240px] max-w-full">
+                        <ChatImageDisplay imageUrl={imgUrl} className="w-full rounded-lg" />
+                      </div>
                     ))}
                   </div>
                 ) : null;
@@ -224,6 +226,9 @@ export const ChatPage = (props: ChatPageProps) => {
       return textFromHtml.length > 0;
     })();
 
+    // Prefer clipboard.items (works reliably across browsers for paste); fall
+    // back to clipboard.files only if items yielded nothing. Reading both would
+    // duplicate every file since the two collections describe the same payload.
     const files: File[] = [];
 
     if (clipboard.items && clipboard.items.length > 0) {
@@ -234,7 +239,7 @@ export const ChatPage = (props: ChatPageProps) => {
       }
     }
 
-    if (clipboard.files && clipboard.files.length > 0) {
+    if (files.length === 0 && clipboard.files && clipboard.files.length > 0) {
       for (const file of Array.from(clipboard.files)) {
         files.push(file);
       }
