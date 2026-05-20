@@ -18,6 +18,7 @@ interface MessageContentProps {
     content: string;
     name: string;
     multiModalImage?: string;
+    multiModalImages?: string[];
     reasoningContent?: string;
     id: string;
   };
@@ -60,13 +61,21 @@ const MessageContent: React.FC<MessageContentProps> = ({ message }) => {
           content={message.content}
           onCitationClick={CitationAction}
         ></Markdown>
-        {message.multiModalImage && (
-          <ChatImageDisplay 
-            imageUrl={message.multiModalImage} 
-            alt="Chat image"
-            className="mt-2"
-          />
-        )}
+        {(() => {
+          const images = message.multiModalImages?.length ? message.multiModalImages : message.multiModalImage ? [message.multiModalImage] : [];
+          return images.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {images.map((imgUrl, imgIdx) => (
+              <ChatImageDisplay 
+                key={imgIdx}
+                imageUrl={imgUrl} 
+                alt="Chat image"
+                className=""
+              />
+            ))}
+          </div>
+        ) : null;
+        })()}
       </>
     );
   }

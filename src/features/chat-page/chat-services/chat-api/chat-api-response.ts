@@ -138,6 +138,7 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
     role: "user",
     chatThreadId: currentChatThread.id,
     multiModalImage: props.multimodalImage,
+    multiModalImages: props.multimodalImages,
   });
 
   // Get available functions (built-in + dynamic extensions)
@@ -346,13 +347,19 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
   ];
 
   // Handle multimodal input for the user message
-  if (props.multimodalImage) {
+  const allImages = props.multimodalImages?.length
+    ? props.multimodalImages
+    : props.multimodalImage
+      ? [props.multimodalImage]
+      : [];
+
+  if (allImages.length > 0) {
     initialInput.push({
       type: "message" as const,
       role: "user" as const,
       content: [
         { type: "input_text", text: props.message },
-        { type: "input_image", image_url: props.multimodalImage }
+        ...allImages.map(img => ({ type: "input_image", image_url: img }))
       ]
     } as any);
   } else {
