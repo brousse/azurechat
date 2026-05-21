@@ -132,6 +132,18 @@ export function ChatStoreProvider({
    */
   const customFetch = useCallback<typeof globalThis.fetch>(
     async (input, init): Promise<Response> => {
+      // DefaultChatTransport routes the reconnect GET
+      // (prepareReconnectToStreamRequest → /api/chat/[id]/stream)
+      // through this same fetch. GET requests can't carry a body, so
+      // anything other than the JSON-bodied submit POST passes through
+      // unchanged — without this short-circuit the browser throws
+      // "Request with GET/HEAD method cannot have body" and the
+      // reattach round-trip never reaches the server.
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method !== "POST") {
+        return fetch(input, init);
+      }
+
       // The transport always JSON.stringify(body) — unwrap it.
       const rawBody =
         typeof init?.body === "string" ? JSON.parse(init.body) : (init?.body ?? {});

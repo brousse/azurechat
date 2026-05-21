@@ -11,7 +11,13 @@ import "server-only";
  */
 export function enforceSameOriginRequest(req: Request): Response | null {
   const requestUrl = new URL(req.url);
-  const expectedHost = requestUrl.host;
+  // Behind Azure App Service (and most reverse proxies) `req.url` carries
+  // the internal hostname while the browser's Origin/Referer carries the
+  // public one — comparing them directly 403s every request. Trust
+  // `X-Forwarded-Host` when present; App Service overwrites any
+  // client-supplied value at the edge, so this is not a CSRF bypass.
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const expectedHost = forwardedHost ?? requestUrl.host;
 
   const origin = req.headers.get("origin");
   if (origin) {

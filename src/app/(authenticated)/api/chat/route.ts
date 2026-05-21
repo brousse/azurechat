@@ -240,6 +240,13 @@ export async function POST(req: Request) {
   // this flag to write a sentinel as a last-resort.
   let onFinishRan = false;
 
+  // streamText's onAbort fires when the abort signal trips, but the
+  // event it hands us only contains finished `steps` — mid-step text
+  // deltas live nowhere addressable after abort. Accumulate them via
+  // onChunk so the stop endpoint can persist what the user already saw.
+  let accumulatedText = "";
+  let accumulatedReasoning = "";
+
   // Register the publisher BEFORE streamText so we can pass abortSignal
   // and so a fast first-chunk doesn't race a late subscriber. The
   // returned AbortController is what POST /api/chat/[id]/stop calls
@@ -280,8 +287,51 @@ export async function POST(req: Request) {
         cause: e?.cause,
       });
     },
-    onAbort: () =>
-      logWarn("/api/chat streamText onAbort fired", { threadId: ctx.thread.id }),
+    onChunk: ({ chunk }) => {
+      if (chunk.type === "text-delta") accumulatedText += chunk.text;
+      else if (chunk.type === "reasoning-delta") accumulatedReasoning += chunk.text;
+    },
+    onAbort: async ({ steps }) => {
+      logWarn("/api/chat streamText onAbort fired", {
+        threadId: ctx.thread.id,
+        textLen: accumulatedText.length,
+        stepCount: steps.length,
+      });
+      // Persist whatever the user already saw. Synthesize an OnFinishEvent
+      // shape from the accumulated chunks + any completed-step toolResults
+      // so we can reuse the existing persist path. onFinish does NOT fire
+      // after an abort, so this is the only place to write the partial.
+      onFinishRan = true;
+      try {
+        const aggregatedToolResults = steps.flatMap((s) => s.toolResults);
+        await persistAssistantFromFinishEvent({
+          threadId: ctx.thread.id,
+          turnId: ctx.turnId,
+          event: {
+            text: accumulatedText,
+            reasoningText: accumulatedReasoning || undefined,
+            toolResults: aggregatedToolResults,
+            finishReason: "other",
+            totalUsage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+            },
+            steps,
+          } as unknown as Parameters<typeof persistAssistantFromFinishEvent>[0]["event"],
+          modelConfig,
+          fallbackInfo: fallbackInfo.fellBack ? fallbackInfo : undefined,
+        });
+      } catch (err) {
+        logError("/api/chat onAbort persist failed", {
+          threadId: ctx.thread.id,
+          turnId: ctx.turnId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        unregisterPublisher(ctx.thread.id);
+      }
+    },
     // Persist from streamText.onFinish so the assistant turn lands in
     // Cosmos when the LLM finishes — not when the response stream closes
     // (which happens early on client disconnect and would persist a
@@ -422,6 +472,13 @@ export async function POST(req: Request) {
     .finally(async () => {
       unregisterPublisher(ctx.thread.id);
       if (onFinishRan) return;
+      // When the user clicked stop, consumeStream settles (rejected
+      // promise from the abort) BEFORE streamText's onAbort callback
+      // runs — so onFinishRan is still false here. Don't write a
+      // sentinel in that case; onAbort owns persistence on the abort
+      // path. Without this guard the sentinel races onAbort's partial
+      // and overwrites the tokens the user already saw.
+      if (abortController.signal.aborted) return;
       logWarn(
         "/api/chat onFinish never fired — writing early-error sentinel",
         {
