@@ -2,9 +2,28 @@
 import React from 'react';
 import { Response } from './response';
 import { CodeBlock, CodeBlockCopyButton } from './code-block';
+import { resolveBlobReferenceToPath } from '@/features/chat-page/chat-services/chat-image-persistence-utils';
 
 export interface RichResponseProps {
   content: string;
+}
+
+/**
+ * Replaces every `blob://threadId/filename` token in markdown text with
+ * the same-origin `/api/images?…` URL the image service resolves it to.
+ * The server-side path keeps `blob://` everywhere (so the model can't
+ * see a URL it might echo back as a duplicate markdown image link) — the
+ * only translation lives here, in the client renderer, right before the
+ * text reaches Streamdown. Without this pass, `![alt](blob://...)`
+ * markdown coming back from the model renders as `[blocked]` because
+ * Streamdown's link sanitizer rejects the `blob:` scheme.
+ *
+ * Code-fenced blocks are split out by `parse()` before this runs, so
+ * literal `blob://` inside ```code``` is left untouched.
+ */
+const BLOB_REF_PATTERN = /blob:\/\/[A-Za-z0-9_-]+\/[^\s)"'>]+/g;
+function resolveBlobRefsInMarkdown(text: string): string {
+  return text.replace(BLOB_REF_PATTERN, (m) => resolveBlobReferenceToPath(m) ?? m);
 }
 
 type Segment = { type: 'code'; language: string; code: string } | { type: 'text'; text: string };
@@ -41,7 +60,7 @@ export const RichResponse: React.FC<RichResponseProps> = ({ content }) => {
   // If no code segments, render whole content once to preserve full markdown context
   const hasCode = segments.some(s => s.type === 'code');
   if (!hasCode) {
-    return <Response>{content}</Response>;
+    return <Response>{resolveBlobRefsInMarkdown(content)}</Response>;
   }
 
   return (
@@ -56,7 +75,7 @@ export const RichResponse: React.FC<RichResponseProps> = ({ content }) => {
         }
         // Preserve original spacing; don't trim to keep markdown structure (headings, lists, tables)
         if (seg.text.length === 0) return null;
-        return <Response key={i}>{seg.text}</Response>;
+        return <Response key={i}>{resolveBlobRefsInMarkdown(seg.text)}</Response>;
       })}
     </div>
   );
