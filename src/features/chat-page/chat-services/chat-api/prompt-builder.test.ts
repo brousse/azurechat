@@ -59,6 +59,7 @@ describe("buildSystemMessage", () => {
     expect(out.indexOf("2026-04-30")).toBeLessThan(out.indexOf("DOCHINT"));
     expect(out.indexOf("DOCHINT")).toBeLessThan(out.indexOf("PERSONA"));
   });
+
 });
 
 describe("isoDate", () => {
