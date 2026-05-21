@@ -211,8 +211,6 @@ export interface ChatMessageModel {
    * One turn = one user submission + the assistant message + any tool
    * rows generated during it. Allows:
    *   - atomic-turn persistence detection (partial turns are findable)
-   *   - resumable streams (server keeps per-turn in-flight registry)
-   *   - per-thread submit mutex (refuse second submit while turnId open)
    *   - turn-level cost rollup
    * Optional for backward compatibility with rows written before this
    * field existed; absence means "pre-turnId data".

@@ -185,6 +185,15 @@ export function ChatStoreProvider({
   const transport = useMemo(() => new DefaultChatTransport({
       api: "/api/chat",
       fetch: customFetch,
+      // Reattach endpoint for useChat({ resume: true }) — keyed by
+      // threadId so the client always knows where to ask. The server
+      // returns 204 when there's no active publisher on the replica
+      // (see /api/chat/[id]/stream/route.ts), at which point the SDK
+      // renders the persisted messages and stops trying.
+      prepareReconnectToStreamRequest: ({ id }) => ({
+        api: `/api/chat/${id}/stream`,
+        credentials: "include",
+      }),
       prepareSendMessagesRequest: ({ messages, body, id }) => {
         // Extract the user message text from the last user message's text parts.
         const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -229,6 +238,11 @@ export function ChatStoreProvider({
     id: threadId,
     messages: initialAiMessages,
     transport,
+    // resume: true tells the SDK to call prepareReconnectToStreamRequest
+    // on mount (i.e., whenever the user navigates back to this thread
+    // while a stream is still in flight). The server replies 204 when
+    // there's nothing to resume, so this is cheap-and-safe to leave on.
+    resume: true,
   });
 
   /**

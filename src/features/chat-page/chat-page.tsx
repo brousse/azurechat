@@ -614,6 +614,16 @@ const ChatPageInner = (props: ChatPageProps) => {
                   aria-label="Stop generating"
                   onClick={(e) => {
                     e.preventDefault();
+                    // Fire-and-forget: ask the server to abort the
+                    // upstream streamText (so we stop burning tokens
+                    // and the partial assistant turn lands in Cosmos
+                    // via onAbort/onFinish). Then disconnect locally.
+                    // The button is idempotent — a second click while
+                    // the abort is unwinding returns 200 from the
+                    // server with aborted=false.
+                    void fetch(`/api/chat/${chatThreadId}/stop`, {
+                      method: "POST",
+                    });
                     stop();
                   }}
                 />

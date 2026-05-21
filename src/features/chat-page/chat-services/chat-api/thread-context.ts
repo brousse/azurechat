@@ -124,7 +124,7 @@ async function resolveHistoryFileRefs(
       }
       try {
         const dataUrl = await getBase64ImageReference(file.url);
-        newParts.push({ ...file, url: dataUrl });
+        newParts.push({ ...file, url: dataUrl, mediaType: file.mediaType ?? "image/png" });
       } catch (err) {
         logWarn(
           "resolveHistoryFileRefs: failed to inline blob ref; dropping file part",
@@ -169,7 +169,7 @@ export interface ThreadContext {
    * Stable identifier for this turn. Stamped on the user row written at
    * load time and threaded through to persistAssistantFromFinishEvent so
    * every row written during the turn shares it. Enables partial-turn
-   * detection, resumable streams, and per-thread submit mutex.
+   * detection.
    */
   turnId: string;
 }

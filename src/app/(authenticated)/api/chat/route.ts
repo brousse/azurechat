@@ -28,10 +28,10 @@ import { resolveProvider } from "@/features/chat-page/chat-services/models/provi
 import { UpdateChatTitle } from "@/features/chat-page/chat-services/chat-thread-service";
 import { buildToolset } from "@/features/chat-page/chat-services/tools/registry";
 import {
-  registerTurnStream,
-  takeTurnStream,
-  unregisterTurnStream,
-} from "@/features/chat-page/chat-services/chat-api/turn-registry";
+  startPublisher,
+  unregisterPublisher,
+} from "@/features/chat-page/chat-services/chat-api/stream-publisher";
+import { enforceSameOriginRequest } from "@/features/chat-page/chat-services/chat-api/same-origin";
 import {
   buildSystemMessage,
   isoDate,
@@ -81,10 +81,8 @@ function reconstructStreamError(
 const MAX_REQUEST_BYTES = 50 * 1024 * 1024;
 
 export async function POST(req: Request) {
-  // CSRF defense: reject cross-origin POSTs. NextAuth's default cookie
-  // SameSite=Lax still permits top-level form submissions from evil.com,
-  // so we reject any Origin that does not match the deployment host.
-  const originCheck = enforceSameOrigin(req);
+  // CSRF defense: reject cross-origin POSTs. See same-origin.ts.
+  const originCheck = enforceSameOriginRequest(req);
   if (originCheck) return originCheck;
 
   // Body-size guard. experimental.serverActions.bodySizeLimit covers only
@@ -242,12 +240,21 @@ export async function POST(req: Request) {
   // this flag to write a sentinel as a last-resort.
   let onFinishRan = false;
 
+  // Register the publisher BEFORE streamText so we can pass abortSignal
+  // and so a fast first-chunk doesn't race a late subscriber. The
+  // returned AbortController is what POST /api/chat/[id]/stop calls
+  // abort() on — req.signal is deliberately NOT forwarded so that a
+  // browser tab-switch does not cancel the run (stream-publisher.ts
+  // keeps replaying for the next subscriber).
+  const { abortController, publish } = startPublisher(ctx.thread.id);
+
   const result = streamText({
     model: resolved.model,
     system,
     messages: await convertToModelMessages(ctx.history),
     tools: allTools,
     stopWhen: stepCountIs(8),
+    abortSignal: abortController.signal,
     experimental_transform: [
       // Order matters: rewrite image_generation base64 → /api/images URL
       // BEFORE the sandbox URL rewriter (the latter only cares about
@@ -255,13 +262,6 @@ export async function POST(req: Request) {
       createImageGenerationStreamRewriter(ctx.thread.id),
       createSandboxUrlTransform(),
     ],
-    // NOTE: do NOT pass req.signal here. We want the LLM call to keep running
-    // when the browser disconnects (user switched chats mid-stream) so the
-    // assistant message lands in Cosmos via onFinish — see also
-    // result.consumeStream() below. The tradeoff: the client's stop() button
-    // no longer aborts the server-side LLM call (it just cuts the visible
-    // stream). A future follow-up could wire an explicit POST /api/chat/stop
-    // endpoint if we need to cancel server-side too.
     providerOptions: resolved.providerOptions,
     onError: ({ error }) => {
       // `Error` objects have non-enumerable `.message` and `.stack`, so
@@ -394,9 +394,9 @@ export async function POST(req: Request) {
           }
         }
       } finally {
-        // Drop the turn-registry entry; nothing useful to resume after
-        // the stream is fully persisted.
-        unregisterTurnStream(ctx.turnId);
+        // Drop the publisher entry; nothing useful to resume after the
+        // stream is fully persisted to Cosmos.
+        unregisterPublisher(ctx.thread.id);
       }
     },
   });
@@ -420,7 +420,7 @@ export async function POST(req: Request) {
       });
     })
     .finally(async () => {
-      unregisterTurnStream(ctx.turnId);
+      unregisterPublisher(ctx.thread.id);
       if (onFinishRan) return;
       logWarn(
         "/api/chat onFinish never fired — writing early-error sentinel",
@@ -469,123 +469,29 @@ export async function POST(req: Request) {
       }
     });
 
-  // Build the framed UI-message-stream HTTP response, then tee the body
-  // so one branch becomes the POST response and the other is parked in
-  // the turn-registry. A future GET /api/chat?turnId=... reconnect picks
-  // up the registry branch, replays the same SSE frames the original
-  // POST is sending. tee() duplicates chunks; each consumer reads at
-  // its own pace, backpressured by the slowest reader.
+  // Build the framed UI-message-stream HTTP response, then tee the body:
+  // one branch is sent to the POST caller, the other feeds the per-thread
+  // publisher so reattach (GET /api/chat/[id]/stream) can replay the
+  // buffered prefix and forward live chunks. tee() backpressures both
+  // consumers on the slower one — the publisher drains eagerly so the
+  // POST stream isn't held back when no GET is attached.
   const framedResponse = result.toUIMessageStreamResponse({
     originalMessages: ctx.history,
     generateMessageId: createIdGenerator({ prefix: "msg", size: 16 }),
     onError: (err) => (err instanceof Error ? err.message : String(err)),
   });
   if (!framedResponse.body) {
+    unregisterPublisher(ctx.thread.id);
     return framedResponse;
   }
   // `blob://` references flow through the wire unchanged. The client
-  // resolves them at render time (tool-part-view / chat-image-display);
-  // the server never produces resolved URLs, which is what prevents the
-  // model from echoing them back as markdown on follow-up turns.
-  const [responseBranch, registryBranch] = framedResponse.body.tee();
-  registerTurnStream(ctx.turnId, registryBranch);
+  // resolves them at render time (tool-part-view / chat-image-display).
+  const [responseBranch, publisherBranch] = framedResponse.body.tee();
+  publish(publisherBranch);
 
-  // Preserve the headers AI SDK set (Content-Type, etc.), add our own
-  // turnId header so clients know what to resume against.
-  const headers = new Headers(framedResponse.headers);
-  headers.set("x-azurechat-turn-id", ctx.turnId);
   return new Response(responseBranch, {
     status: framedResponse.status,
     statusText: framedResponse.statusText,
-    headers,
+    headers: framedResponse.headers,
   });
-}
-
-/**
- * GET /api/chat?turnId=<id>
- *
- * Resume endpoint for clients that lost the original streaming POST
- * (browser navigation, tab refresh during stream). Returns the live
- * stream if the turnId is registered and untaken on THIS replica;
- * otherwise returns 404 so the client falls back to polling (#27 caps
- * that at 60 s).
- *
- * One-reader-per-stream by design (see turn-registry.ts notes). A
- * second resume attempt for the same in-flight turn returns 409.
- */
-export async function GET(req: Request) {
-  const originCheck = enforceSameOrigin(req);
-  if (originCheck) return originCheck;
-
-  const url = new URL(req.url);
-  const turnId = url.searchParams.get("turnId");
-  if (!turnId) {
-    return new Response("Missing turnId query parameter", { status: 400 });
-  }
-
-  const stream = takeTurnStream(turnId);
-  if (!stream) {
-    // 404 is the "fall back to polling / persisted-message reload"
-    // signal for the client. Distinct from 410 (gone), which we'd use
-    // if we tracked taken-but-completed entries.
-    return new Response("No in-flight stream for this turnId", { status: 404 });
-  }
-
-  return new Response(stream as ReadableStream<Uint8Array>, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream",
-      "x-vercel-ai-ui-message-stream": "v1",
-      "x-azurechat-turn-id": turnId,
-      "x-azurechat-resumed": "1",
-    },
-  });
-}
-
-/**
- * Returns a 403 Response when the request's Origin (or, if Origin is
- * absent, Referer) does not match the request URL's host. Returns null
- * when the request is same-origin.
- *
- * This is the cheap, framework-agnostic CSRF defense. Origin is mandatory
- * for cross-site form POSTs in modern browsers, and is set even for
- * SameSite=Lax cookie deliveries.
- */
-function enforceSameOrigin(req: Request): Response | null {
-  const requestUrl = new URL(req.url);
-  const expectedHost = requestUrl.host;
-
-  const origin = req.headers.get("origin");
-  if (origin) {
-    let originHost: string;
-    try {
-      originHost = new URL(origin).host;
-    } catch {
-      return new Response("Bad Origin header", { status: 403 });
-    }
-    if (originHost !== expectedHost) {
-      return new Response("Cross-origin request refused", { status: 403 });
-    }
-    return null;
-  }
-
-  // No Origin (rare; some same-origin server-to-server fetches) — fall back
-  // to Referer, which is set by browsers for top-level navigation POSTs.
-  const referer = req.headers.get("referer");
-  if (referer) {
-    try {
-      const refererHost = new URL(referer).host;
-      if (refererHost !== expectedHost) {
-        return new Response("Cross-origin request refused", { status: 403 });
-      }
-      return null;
-    } catch {
-      return new Response("Bad Referer header", { status: 403 });
-    }
-  }
-
-  // No Origin and no Referer: refuse. Genuine browser submits always carry
-  // at least one for cross-frame/cross-origin contexts; absence of both is
-  // typical of a forged request from a non-browser client.
-  return new Response("Missing Origin/Referer", { status: 403 });
 }
