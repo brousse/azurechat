@@ -24,6 +24,7 @@ import { consumeRateLimitToken } from "@/features/chat-page/chat-services/chat-a
 import { resolveRateLimitSubject } from "@/features/chat-page/chat-services/chat-api/rate-limit-subject";
 import { createSandboxUrlTransform } from "@/features/chat-page/chat-services/chat-api/sandbox-url-transform";
 import { createImageGenerationStreamRewriter } from "@/features/chat-page/chat-services/chat-api/image-generation-stream-rewriter";
+import { createCodeInterpreterStreamRewriter } from "@/features/chat-page/chat-services/chat-api/code-interpreter-stream-rewriter";
 import { resolveProvider } from "@/features/chat-page/chat-services/models/provider-seam";
 import { UpdateChatTitle } from "@/features/chat-page/chat-services/chat-thread-service";
 import { buildToolset } from "@/features/chat-page/chat-services/tools/registry";
@@ -263,10 +264,12 @@ export async function POST(req: Request) {
     stopWhen: stepCountIs(8),
     abortSignal: abortController.signal,
     experimental_transform: [
-      // Order matters: rewrite image_generation base64 → /api/images URL
-      // BEFORE the sandbox URL rewriter (the latter only cares about
-      // text-delta and tool outputs with resolved URLs in `outputs[]`).
+      // Order matters: both image-bytes rewriters mutate `output.result` /
+      // `outputs[].url` BEFORE the sandbox URL rewriter, which then sees
+      // already-resolved URLs (or blob refs) when harvesting the filename
+      // map for text-delta rewriting.
       createImageGenerationStreamRewriter(ctx.thread.id),
+      createCodeInterpreterStreamRewriter(ctx.thread.id),
       createSandboxUrlTransform(),
     ],
     providerOptions: resolved.providerOptions,
