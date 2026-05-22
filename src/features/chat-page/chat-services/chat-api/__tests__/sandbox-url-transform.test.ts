@@ -49,6 +49,50 @@ describe("sandbox-url-transform", () => {
     expect(out).toEqual(input);
   });
 
+  it("rewrites a sandbox URL split across many text-delta chunks (Azure's typical streaming pattern)", async () => {
+    // Azure delivers sandbox URLs in fragments — observed for
+    // sandbox:/mnt/data/random_pyplot.png splitting into
+    // "sandbox", ":/", "mnt", "/data", "/random", "_py", "plot",
+    // ".png", ")" — pre-fix the per-delta substitution never saw a
+    // complete pattern and the URL leaked through to Streamdown.
+    const out = await pipe([
+      {
+        type: "tool-result",
+        toolName: "code_interpreter",
+        output: { outputs: [{ type: "image", url: STORED, filename: "red.png" }] },
+      },
+      { type: "text-delta", id: "1", text: "Here it is: [download](" },
+      { type: "text-delta", id: "1", text: "sandbox" },
+      { type: "text-delta", id: "1", text: ":/" },
+      { type: "text-delta", id: "1", text: "mnt" },
+      { type: "text-delta", id: "1", text: "/data" },
+      { type: "text-delta", id: "1", text: "/red" },
+      { type: "text-delta", id: "1", text: ".png" },
+      { type: "text-delta", id: "1", text: ")" },
+      { type: "text-end", id: "1" },
+    ]);
+
+    const reassembled = out
+      .filter((c) => c.type === "text-delta")
+      .map((c) => c.text)
+      .join("");
+    expect(reassembled).toContain(STORED);
+    expect(reassembled).not.toContain(SANDBOX);
+    expect(reassembled).not.toContain("sandbox:/mnt/data");
+  });
+
+  it("flushes pending tail on text-end even if it never completed into a sandbox URL", async () => {
+    const out = await pipe([
+      { type: "text-delta", id: "1", text: "I will mention sandboxes briefly: sand" },
+      { type: "text-end", id: "1" },
+    ]);
+    const reassembled = out
+      .filter((c) => c.type === "text-delta")
+      .map((c) => c.text)
+      .join("");
+    expect(reassembled).toBe("I will mention sandboxes briefly: sand");
+  });
+
   it("ignores tool-results from other tools", async () => {
     const out = await pipe([
       {
