@@ -15,7 +15,7 @@ import {
   stepCountIs,
   createIdGenerator,
 } from "ai";
-import type { ToolSet } from "ai";
+import type { StepResult, ToolSet } from "ai";
 import { validateMultimodalInput } from "@/features/chat-page/chat-services/chat-api/validate-input";
 import { resolveModelAndLimits } from "@/features/chat-page/chat-services/chat-api/model-selection";
 import { loadThreadContext } from "@/features/chat-page/chat-services/chat-api/thread-context";
@@ -25,8 +25,11 @@ import { resolveRateLimitSubject } from "@/features/chat-page/chat-services/chat
 import { createSandboxUrlTransform } from "@/features/chat-page/chat-services/chat-api/sandbox-url-transform";
 import { createImageGenerationStreamRewriter } from "@/features/chat-page/chat-services/chat-api/image-generation-stream-rewriter";
 import { createCodeInterpreterStreamRewriter } from "@/features/chat-page/chat-services/chat-api/code-interpreter-stream-rewriter";
-import { resolveProvider } from "@/features/chat-page/chat-services/models/provider-seam";
-import { UpdateChatTitle } from "@/features/chat-page/chat-services/chat-thread-service";
+import { resolveProvider, getFileIdsSignature } from "@/features/chat-page/chat-services/models/provider-seam";
+import {
+  UpdateChatTitle,
+  UpdateChatThreadCodeInterpreterContainer,
+} from "@/features/chat-page/chat-services/chat-thread-service";
 import { buildToolset } from "@/features/chat-page/chat-services/tools/registry";
 import {
   startPublisher,
@@ -74,6 +77,30 @@ function reconstructStreamError(
     .join("; ");
   const synthesized = providerErrorMessage || warningMessages;
   return synthesized ? { message: synthesized, name: "ProviderError" } : null;
+}
+
+/**
+ * Walks the AI SDK step results looking for a code_interpreter tool call
+ * and returns its containerId. Built-in Azure tools aren't in our
+ * `ToolSet`, so the part's `input` is typed `never` after the discriminant
+ * narrow — we widen back to the Responses-API shape locally rather than
+ * polluting the route's ToolSet declaration.
+ */
+function harvestCodeInterpreterContainerId(
+  steps: ReadonlyArray<StepResult<ToolSet>>,
+): string | undefined {
+  for (const step of steps) {
+    for (const part of step.content) {
+      if (part.type !== "tool-call" && part.type !== "tool-result") continue;
+      if (part.toolName !== "code_interpreter") continue;
+      const input = (part as { input?: { containerId?: unknown } }).input;
+      const containerId = input?.containerId;
+      if (typeof containerId === "string" && containerId.length > 0) {
+        return containerId;
+      }
+    }
+  }
+  return undefined;
 }
 
 // Hard upper bound on the multipart body. validateMultimodalInput enforces a
@@ -199,6 +226,41 @@ export async function POST(req: Request) {
     depth: 0,
   });
 
+  // Code-interpreter file IDs the user attached this turn. The chat-store
+  // sends them as `codeInterpreterFileIds` (OpenAI file IDs from
+  // /api/code-interpreter/upload). When this set differs from the
+  // persisted signature, the previous Azure container's files no longer
+  // match user intent — invalidate so the provider seam asks Azure to
+  // mint a fresh container with `container: { fileIds }`. Without this
+  // the route used to (and now again does) ignore attached files,
+  // surfacing as "I don't have this file" from the model.
+  const requestedCiFileIds = payload.codeInterpreterFileIds ?? [];
+  const requestedCiSignature = getFileIdsSignature(requestedCiFileIds);
+  const persistedCiSignature = ctx.thread.codeInterpreterFileIdsSignature ?? "";
+  const ciFilesChanged = requestedCiSignature !== persistedCiSignature;
+  if (effectiveTools.codeInterpreter && ciFilesChanged) {
+    try {
+      await UpdateChatThreadCodeInterpreterContainer(
+        ctx.thread.id,
+        "",
+        requestedCiSignature,
+      );
+      ctx.thread.codeInterpreterContainerId = undefined;
+      ctx.thread.codeInterpreterFileIdsSignature = requestedCiSignature;
+      logInfo("/api/chat invalidated code_interpreter container", {
+        threadId: ctx.thread.id,
+        previousSignature: persistedCiSignature,
+        newSignature: requestedCiSignature,
+        fileCount: requestedCiFileIds.length,
+      });
+    } catch (err) {
+      logError("/api/chat failed to invalidate code_interpreter container", {
+        threadId: ctx.thread.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // Resolve provider-native parts (model, built-in tools, providerOptions)
   // through the provider seam so Anthropic / future providers slot in
   // without touching this route handler (architect2 SEV-2 B10).
@@ -213,6 +275,7 @@ export async function POST(req: Request) {
       supported: modelConfig.supportsReasoning,
       effort: effectiveReasoningEffort,
     },
+    codeInterpreterFileIds: requestedCiFileIds,
   });
   logInfo("/api/chat builtInTools", {
     keys: Object.keys(resolved.builtInTools),
@@ -384,6 +447,32 @@ export async function POST(req: Request) {
           UpdateChatTitle(ctx.thread.id, payload.message).catch((err) => {
             logError("/api/chat UpdateChatTitle failed", {
               threadId: ctx.thread.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+
+        // Harvest the container_id Azure stamped on any code_interpreter
+        // tool call this turn so the next turn reuses the same container
+        // (preserves uploaded files + working-directory state). For
+        // provider-executed tools the AI SDK surfaces typed tool-call
+        // parts in step.content; built-in Azure tool inputs aren't in
+        // our ToolSet so we narrow the input shape locally.
+        const harvestedContainerId = harvestCodeInterpreterContainerId(
+          event.steps ?? [],
+        );
+        if (
+          harvestedContainerId &&
+          harvestedContainerId !== ctx.thread.codeInterpreterContainerId
+        ) {
+          UpdateChatThreadCodeInterpreterContainer(
+            ctx.thread.id,
+            harvestedContainerId,
+            requestedCiSignature,
+          ).catch((err) => {
+            logError("/api/chat failed to persist code_interpreter containerId", {
+              threadId: ctx.thread.id,
+              containerId: harvestedContainerId,
               error: err instanceof Error ? err.message : String(err),
             });
           });

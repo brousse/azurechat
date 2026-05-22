@@ -72,6 +72,31 @@ export interface ResolveProviderArgs {
     supported: boolean;
     effort: ReasoningEffort | undefined;
   };
+  /**
+   * Files the user attached for code_interpreter this turn (OpenAI file
+   * IDs from `/api/code-interpreter/upload`). When no container is
+   * reusable, we ask Azure to spin up a fresh container with these
+   * files attached via `container: { fileIds }` — without this the
+   * container starts empty and `read_file()` returns "file not found".
+   *
+   * The caller is responsible for invalidating a stale container before
+   * calling: if `codeInterpreterContainerId` is set we trust it covers
+   * these file IDs. Mismatch resolution lives in route.ts via the
+   * persisted `codeInterpreterFileIdsSignature`.
+   */
+  codeInterpreterFileIds?: string[];
+}
+
+/**
+ * Stable signature for a set of OpenAI file IDs. Used by the route to
+ * detect when a thread's attached-file set changed between turns so the
+ * persisted container_id can be invalidated and Azure asked to create a
+ * fresh container with the new file set. Sort + dedupe so reorder /
+ * duplicates don't cause spurious invalidations.
+ */
+export function getFileIdsSignature(fileIds: string[] | undefined): string {
+  if (!fileIds || fileIds.length === 0) return "";
+  return [...new Set(fileIds)].sort().join(",");
 }
 
 /**
@@ -111,14 +136,30 @@ function resolveAzureBackedProvider(args: ResolveProviderArgs): ResolvedProvider
   const model = resolveAzureModel(args.modelId);
 
   // Built-in tools that Azure runs server-side (Responses API).
-  // codeInterpreter: optional `container` carrying file-id list across turns.
+  // codeInterpreter: container reuse OR fileIds-bootstrap, see below.
   // imageGeneration & webSearchPreview: parameterless.
   const builtInTools: Record<string, unknown> = {};
   if (args.toggles.codeInterpreter) {
     const containerId = args.thread.codeInterpreterContainerId;
-    builtInTools["code_interpreter"] = azure.tools.codeInterpreter(
-      containerId ? { container: containerId } : {}
-    );
+    const fileIds = args.codeInterpreterFileIds ?? [];
+    // Three shapes the @ai-sdk/azure codeInterpreter accepts:
+    //   - container: "<id>"           → reuse the existing container; files
+    //                                    are already attached on Azure's side
+    //   - container: { fileIds: [..]} → ask Azure to mint a new container
+    //                                    and attach these uploaded files
+    //   - {}                          → empty container, no files
+    // We pick reuse first because it's stable across turns AND preserves
+    // any working-directory state the interpreter built up (downloaded
+    // CSVs, generated images, etc.). Route invalidates this id when the
+    // file signature changes, so a non-empty containerId here implies
+    // the files are still current.
+    let codeInterpreterArgs: { container?: string | { fileIds?: string[] } } = {};
+    if (containerId) {
+      codeInterpreterArgs = { container: containerId };
+    } else if (fileIds.length > 0) {
+      codeInterpreterArgs = { container: { fileIds } };
+    }
+    builtInTools["code_interpreter"] = azure.tools.codeInterpreter(codeInterpreterArgs);
   }
   if (args.toggles.imageGeneration) {
     // partialImages: 0 tells Azure NOT to stream partial-image previews.

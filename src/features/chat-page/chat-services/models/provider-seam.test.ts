@@ -26,7 +26,7 @@ vi.mock("@ai-sdk/azure", () => ({
   },
 }));
 
-import { resolveProvider } from "./provider-seam";
+import { resolveProvider, getFileIdsSignature } from "./provider-seam";
 
 const baseThread = { id: "thread-1", codeInterpreterContainerId: undefined };
 const baseReasoning = { supported: false, effort: undefined };
@@ -80,6 +80,49 @@ describe("provider-seam — Azure branch", () => {
       reasoning: baseReasoning,
     });
     expect(Object.keys(r.builtInTools)).toEqual(["code_interpreter"]);
+    expect(mockCodeInterpreter).toHaveBeenCalledWith({});
+  });
+
+  it("passes container: { fileIds } when files attached + no container yet", () => {
+    // First turn with SharePoint / uploaded files: no persisted container,
+    // so Azure mints a new one with these uploads attached. Pre-fix the
+    // route ignored payload.codeInterpreterFileIds and the model saw an
+    // empty container → "I don't have this file".
+    resolveProvider({
+      modelId: "gpt-5.5",
+      thread: { id: "t", codeInterpreterContainerId: undefined },
+      toggles: { codeInterpreter: true, imageGeneration: false, webSearch: false },
+      reasoning: baseReasoning,
+      codeInterpreterFileIds: ["file-abc", "file-def"],
+    });
+    expect(mockCodeInterpreter).toHaveBeenCalledWith({
+      container: { fileIds: ["file-abc", "file-def"] },
+    });
+  });
+
+  it("prefers existing containerId over fileIds (route handles invalidation)", () => {
+    // Subsequent turn with the same files: provider seam trusts the
+    // persisted container. The route's signature check is what
+    // invalidates `codeInterpreterContainerId` upstream when files
+    // actually changed.
+    resolveProvider({
+      modelId: "gpt-5.5",
+      thread: { id: "t", codeInterpreterContainerId: "cnt-existing" },
+      toggles: { codeInterpreter: true, imageGeneration: false, webSearch: false },
+      reasoning: baseReasoning,
+      codeInterpreterFileIds: ["file-abc"],
+    });
+    expect(mockCodeInterpreter).toHaveBeenCalledWith({ container: "cnt-existing" });
+  });
+
+  it("falls back to empty options when toggle on, no container, no files", () => {
+    resolveProvider({
+      modelId: "gpt-5.5",
+      thread: baseThread,
+      toggles: { codeInterpreter: true, imageGeneration: false, webSearch: false },
+      reasoning: baseReasoning,
+      codeInterpreterFileIds: [],
+    });
     expect(mockCodeInterpreter).toHaveBeenCalledWith({});
   });
 
@@ -146,5 +189,22 @@ describe("provider-seam — error paths", () => {
         reasoning: baseReasoning,
       }),
     ).toThrow(/unknown modelId/);
+  });
+});
+
+describe("getFileIdsSignature", () => {
+  it("returns empty string for undefined or empty input", () => {
+    expect(getFileIdsSignature(undefined)).toBe("");
+    expect(getFileIdsSignature([])).toBe("");
+  });
+
+  it("sorts and dedupes so reorder / duplicates don't trigger invalidation", () => {
+    expect(getFileIdsSignature(["b", "a"])).toBe("a,b");
+    expect(getFileIdsSignature(["a", "b", "a"])).toBe("a,b");
+    expect(getFileIdsSignature(["a", "b"])).toEqual(getFileIdsSignature(["b", "a"]));
+  });
+
+  it("produces distinct signatures for distinct sets", () => {
+    expect(getFileIdsSignature(["a"])).not.toBe(getFileIdsSignature(["a", "b"]));
   });
 });

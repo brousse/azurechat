@@ -41,6 +41,8 @@ vi.mock("@/features/chat-page/chat-services/models/provider-seam", () => ({
     builtInTools: {},
     providerOptions: { openai: { promptCacheKey: "test", store: false } },
   }),
+  getFileIdsSignature: (ids: string[] | undefined) =>
+    !ids || ids.length === 0 ? "" : [...new Set(ids)].sort().join(","),
 }));
 vi.mock("@/features/extensions-page/extension-services/extension-service", () => ({
   FindAllExtensionForCurrentUserAndIds: (...a: unknown[]) => mockFindAllExtensions(...a),
