@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
 const path = require("path");
 
+// Origins allowed to frame the /embed/* routes. Space-separated list driven by
+// EMBED_ALLOWED_ANCESTORS (e.g. "'self' https://tenant.sharepoint.com").
+// Defaults to 'self' only — the embed feature is opt-in per deployment.
+const embedFrameAncestors = (
+  process.env.EMBED_ALLOWED_ANCESTORS || "'self'"
+).trim();
+
 const nextConfig = {
   output: "standalone",
   distDir: "build",
@@ -30,6 +37,35 @@ const nextConfig = {
       dynamic: 0,
       static: 30,
     },
+  },
+  async headers() {
+    return [
+      {
+        // Embed routes may be framed by the allow-listed ancestors. We rely on
+        // CSP frame-ancestors (which supports an allow-list) and deliberately
+        // do NOT set X-Frame-Options here — it has no allow-list semantics and
+        // CSP supersedes it in modern browsers.
+        source: "/embed/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: `frame-ancestors ${embedFrameAncestors};`,
+          },
+        ],
+      },
+      {
+        // Everything else: the app must not be framable. Negative lookahead
+        // excludes /embed so the rule above is the only framing policy there.
+        source: "/((?!embed).*)",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'self';",
+          },
+        ],
+      },
+    ];
   },
 };
 

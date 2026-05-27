@@ -37,6 +37,7 @@ import { X, FileSpreadsheet } from "lucide-react";
 import { ChatImageDisplay } from "./chat-image-display";
 import type { UIMessage, FileUIPart } from "ai";
 import { uiMessagesFromChatMessages } from "./chat-services/chat-api/message-adapter";
+import { useEmbedMode } from "@/features/embed/embed-mode-context";
 
 interface ChatPageProps {
   messages: Array<ChatMessageModel>;
@@ -278,6 +279,12 @@ const ChatPageInner = (props: ChatPageProps) => {
   const { data: session } = useSession();
   const profilePicture = useProfilePicture(session?.user?.accessToken);
 
+  // In embed mode the EmbedFrame supplies its own compact header, so the full
+  // ChatHeader (model/persona switcher, extension drawer, reset, token usage)
+  // is suppressed. EmbedModeProvider only wraps the /embed routes, so this is
+  // a no-op in the normal app.
+  const { isEmbed } = useEmbedMode();
+
   // Per-thread state from Zustand (seeded from chatThread at provider mount).
   const input = useChatStore((s) => s.inputText);
   const setInputText = useChatStore((s) => s.setInputText);
@@ -432,11 +439,13 @@ const ChatPageInner = (props: ChatPageProps) => {
 
   return (
     <main className="flex flex-1 relative flex-col px-3 gap-3 overflow-hidden">
-      <ChatHeader
-        chatThread={props.chatThread}
-        chatDocuments={props.chatDocuments}
-        extensions={props.extensions}
-      />
+      {!isEmbed && (
+        <ChatHeader
+          chatThread={props.chatThread}
+          chatDocuments={props.chatDocuments}
+          extensions={props.extensions}
+        />
+      )}
 
       <ChatMessages profilePicture={profilePicture} />
 
