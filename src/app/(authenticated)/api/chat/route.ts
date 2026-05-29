@@ -36,10 +36,7 @@ import {
   unregisterPublisher,
 } from "@/features/chat-page/chat-services/chat-api/stream-publisher";
 import { enforceSameOriginRequest } from "@/features/chat-page/chat-services/chat-api/same-origin";
-import {
-  buildSystemMessage,
-  isoDate,
-} from "@/features/chat-page/chat-services/chat-api/prompt-builder";
+import { buildSystemMessage } from "@/features/chat-page/chat-services/chat-api/prompt-builder";
 import { CHAT_DEFAULT_SYSTEM_PROMPT } from "@/features/theme/theme-config";
 import {
   FindAllExtensionForCurrentUserAndIds,
@@ -194,7 +191,6 @@ export async function POST(req: Request) {
     buildSystemMessage({
       staticSystemPrompt: CHAT_DEFAULT_SYSTEM_PROMPT,
       personaMessage: ctx.thread.personaMessage ?? "",
-      today: isoDate(),
       documentHint: ctx.documentHint,
     }) +
     // Generative UI: GPT-5.5 reliably declines a UI *tool* under tool_choice

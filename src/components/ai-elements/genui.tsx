@@ -16,7 +16,7 @@ import * as React from 'react';
 import { defineCatalog } from '@json-render/core';
 import { createRenderer } from '@json-render/react';
 import { schema } from '@json-render/react/schema';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 import {
   Card,
   CardContent,
@@ -127,7 +127,11 @@ export const genuiCatalog = defineCatalog(schema, {
       }),
     },
   },
-});
+  // json-render's defineCatalog types `props` as a branded SchemaType<"zod">,
+  // not a raw z.object() — its public docs pass z.object() directly, so the
+  // type is stricter than the supported usage. Components render untyped (see
+  // readProps), so loosen the catalog input type. (Unrelated to the zod version.)
+} as any);
 
 // ---------------------------------------------------------------------------
 // Registry — maps each catalog component to a real Bühler shadcn component.
@@ -158,10 +162,10 @@ const genuiComponents = {
       const p = readProps(a);
       return (
         <Card>
-          {(p.title || p.description) && (
+          {(!!p.title || !!p.description) && (
             <CardHeader>
-              {p.title && <CardTitle className="text-base">{String(p.title)}</CardTitle>}
-              {p.description && <CardDescription>{String(p.description)}</CardDescription>}
+              {!!p.title && <CardTitle className="text-base">{String(p.title)}</CardTitle>}
+              {!!p.description && <CardDescription>{String(p.description)}</CardDescription>}
             </CardHeader>
           )}
           <CardContent className="space-y-3">{a.children}</CardContent>
@@ -217,7 +221,7 @@ const genuiComponents = {
     },
     Text: (a: any) => {
       const p = readProps(a);
-      return <p className={cn('text-sm', p.muted && 'text-muted-foreground')}>{String(p.content ?? '')}</p>;
+      return <p className={cn('text-sm', !!p.muted && 'text-muted-foreground')}>{String(p.content ?? '')}</p>;
     },
     Chart: (a: any) => {
       const p = readProps(a);
@@ -227,7 +231,7 @@ const genuiComponents = {
       const height = 220;
       return (
         <div className="flex flex-col gap-2">
-          {p.title && <span className="text-sm font-medium">{String(p.title)}</span>}
+          {!!p.title && <span className="text-sm font-medium">{String(p.title)}</span>}
           <div ref={ref} className="w-full" style={{ height }}>
             {width > 0 &&
               (isBar ? (
