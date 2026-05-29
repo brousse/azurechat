@@ -18,6 +18,13 @@ export interface ToolContext {
   personaDocumentIds: string[];
   /** Feature toggles derived from the persona / thread settings. */
   defaultTools: DefaultTools;
+  /**
+   * The user's local datetime as an ISO 8601 string with UTC offset
+   * (e.g. "2026-05-29T19:40:00.123+02:00"), forwarded by the browser via the
+   * `x-client-datetime` header. The `get_current_time` tool returns it so the
+   * model answers in the user's local time; falls back to server UTC.
+   */
+  clientDateTime?: string;
   /** Extension records resolved at the callsite (headers already in secrets). */
   extensions: Array<{ extension: ExtensionModel; headerSecrets: Record<string, string> }>;
   /**

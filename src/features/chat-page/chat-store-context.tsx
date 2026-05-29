@@ -108,6 +108,26 @@ interface TransportBodyExtras {
   _images: string[];
 }
 
+/**
+ * Formats a Date as ISO 8601 with the browser's local UTC offset
+ * (e.g. "2026-05-29T19:40:00.123+02:00"). Unlike Date#toISOString (always UTC,
+ * "Z"-suffixed), this preserves the user's local time + offset, sent via the
+ * `x-client-datetime` header for the get_current_time tool.
+ */
+function localISOWithOffset(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offsetMin = -d.getTimezoneOffset(); // positive east of UTC
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(offsetMin);
+  const offset = `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `.${String(d.getMilliseconds()).padStart(3, "0")}` +
+    offset
+  );
+}
+
 export function ChatStoreProvider({
   threadId,
   initialAiMessages,
@@ -180,6 +200,9 @@ export function ChatStoreProvider({
       const headers = new Headers(init?.headers);
       headers.delete("Content-Type");
       headers.delete("content-type");
+      // The user's local datetime (ISO 8601 with UTC offset) so the server's
+      // get_current_time tool can answer in their timezone, not the server's.
+      headers.set("x-client-datetime", localISOWithOffset(new Date()));
 
       return fetch(input, {
         ...init,

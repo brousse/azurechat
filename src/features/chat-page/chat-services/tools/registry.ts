@@ -6,6 +6,7 @@ import { searchDocumentsTool } from "./search-documents";
 import { searchCompanyContentTool } from "./search-company-content";
 import { callSubAgentTool } from "./call-sub-agent";
 import { searchSubAgentTool } from "./search-sub-agent";
+import { getCurrentTimeTool } from "./get-current-time";
 import { extensionTool } from "./extension-tool";
 import type { ToolContext } from "./tool-context";
 
@@ -37,6 +38,10 @@ export async function buildToolset(
   if (ctx.defaultTools?.companyContent) {
     entries.push(["search_company_content", searchCompanyContentTool(ctx)]);
   }
+
+  // Current time — always available. Lets the model fetch the user's local
+  // datetime on demand instead of baking it into the (cache-sensitive) prompt.
+  entries.push(["get_current_time", getCurrentTimeTool(ctx)]);
 
   // Sub-agent tools are always available (subject to the recursion
   // guard). There is no "fixed assignment" — any persona the user has

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemMessage, isoDate, sortFunctionTools } from "./prompt-builder";
+import { buildSystemMessage, sortFunctionTools } from "./prompt-builder";
 
 // These tests lock down byte-for-byte stability of the parts of the request
 // that participate in the Azure OpenAI prompt cache key. A regression here
@@ -10,7 +10,6 @@ describe("buildSystemMessage", () => {
   const baseInputs = {
     staticSystemPrompt: "You are a friendly Test AI assistant.",
     personaMessage: "Be terse. Cite sources.",
-    today: "2026-04-30",
     documentHint: "",
   };
 
@@ -32,7 +31,6 @@ describe("buildSystemMessage", () => {
 
   it("changes when (and only when) one of the documented inputs changes", () => {
     const baseline = buildSystemMessage(baseInputs);
-    expect(buildSystemMessage({ ...baseInputs, today: "2026-05-01" })).not.toBe(baseline);
     expect(buildSystemMessage({ ...baseInputs, personaMessage: "Different persona." })).not.toBe(baseline);
     expect(buildSystemMessage({ ...baseInputs, documentHint: "\n\nDOCS: foo.pdf" })).not.toBe(baseline);
     expect(buildSystemMessage({ ...baseInputs, staticSystemPrompt: "different static" })).not.toBe(baseline);
@@ -43,40 +41,32 @@ describe("buildSystemMessage", () => {
     const withOmitted = buildSystemMessage({
       staticSystemPrompt: baseInputs.staticSystemPrompt,
       personaMessage: baseInputs.personaMessage,
-      today: baseInputs.today,
     });
     expect(withOmitted).toBe(withEmpty);
   });
 
-  it("places dynamic segments in the documented order: static, date, doc-hint, persona", () => {
+  it("does NOT inject any date — output must be stable across calendar days", () => {
     const out = buildSystemMessage({
       staticSystemPrompt: "STATIC",
       personaMessage: "PERSONA",
-      today: "2026-04-30",
+      documentHint: "",
+    });
+    // No ISO date and no "Today" marker should leak into the prompt; otherwise
+    // the prompt cache would invalidate at every UTC midnight rollover.
+    expect(out).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(out.toLowerCase()).not.toContain("today");
+  });
+
+  it("places dynamic segments in the documented order: static, doc-hint, persona", () => {
+    const out = buildSystemMessage({
+      staticSystemPrompt: "STATIC",
+      personaMessage: "PERSONA",
       documentHint: "DOCHINT",
     });
-    expect(out.indexOf("STATIC")).toBeLessThan(out.indexOf("2026-04-30"));
-    expect(out.indexOf("2026-04-30")).toBeLessThan(out.indexOf("DOCHINT"));
+    expect(out.indexOf("STATIC")).toBeLessThan(out.indexOf("DOCHINT"));
     expect(out.indexOf("DOCHINT")).toBeLessThan(out.indexOf("PERSONA"));
   });
 
-});
-
-describe("isoDate", () => {
-  it("formats as YYYY-MM-DD regardless of locale", () => {
-    const fixed = new Date("2026-04-30T13:14:15.678Z");
-    expect(isoDate(fixed)).toBe("2026-04-30");
-  });
-
-  it("is byte-identical for identical input dates", () => {
-    const d1 = new Date("2026-04-30T00:00:00Z");
-    const d2 = new Date("2026-04-30T23:59:59Z");
-    expect(isoDate(d1)).toBe(isoDate(d2));
-  });
-
-  it("matches the ISO calendar-date pattern", () => {
-    expect(isoDate(new Date())).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  });
 });
 
 describe("sortFunctionTools", () => {

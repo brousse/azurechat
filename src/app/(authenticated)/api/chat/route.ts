@@ -233,6 +233,8 @@ export async function POST(req: Request) {
     defaultTools: ctx.defaultTools ?? {},
     extensions: resolvedExtensions,
     subAgentIds: ctx.thread.subAgentIds,
+    // Browser-local datetime for the get_current_time tool (server UTC fallback).
+    clientDateTime: req.headers.get("x-client-datetime") ?? undefined,
     depth: 0,
   });
 

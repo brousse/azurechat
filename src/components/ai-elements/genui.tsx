@@ -35,7 +35,6 @@ import {
 import { Badge } from '@/features/ui/badge';
 import { cn } from '@/features/ui/lib';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { Shimmer } from './shimmer';
 import {
   LineChart,
   Line,
@@ -258,15 +257,6 @@ const genuiComponents = {
 // low-level <Renderer> requires). Maps catalog components → Bühler shadcn.
 const GenuiRenderer = createRenderer(genuiCatalog, genuiComponents as any);
 
-/** Auto-generated system prompt describing the catalog — inject server-side for production. */
-export function genuiSystemPrompt(): string {
-  try {
-    return genuiCatalog.prompt();
-  } catch {
-    return '';
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Render wrapper — parses the streamed JSON and renders it, with an error
 // boundary so a malformed/partial spec never takes down the chat message.
@@ -291,39 +281,6 @@ class GenUIBoundary extends React.Component<
   }
 }
 
-/**
- * A spec is safe to hand to json-render only when its tree is referentially
- * complete: `root` exists and every `children` id resolves to a present
- * element. While a spec streams in, children point at elements that haven't
- * arrived yet — rendering that partial tree makes json-render's resolver loop
- * ("Maximum update depth exceeded"). Until complete, we show a shimmer.
- */
-function specIsComplete(spec: unknown): spec is { root: string; elements: Record<string, { children?: unknown }> } {
-  if (!spec || typeof spec !== 'object') return false;
-  const s = spec as { root?: unknown; elements?: unknown };
-  if (typeof s.root !== 'string' || !s.elements || typeof s.elements !== 'object') return false;
-  const elements = s.elements as Record<string, { children?: unknown }>;
-  const ids = new Set(Object.keys(elements));
-  if (!ids.has(s.root)) return false;
-  for (const el of Object.values(elements)) {
-    const kids = (el as { children?: unknown })?.children;
-    if (Array.isArray(kids)) {
-      for (const k of kids) {
-        if (typeof k === 'string' && !ids.has(k)) return false; // child not streamed in yet
-      }
-    }
-  }
-  return true;
-}
-
-function GenUILoading() {
-  return (
-    <div className="my-2 rounded-lg border border-border/60 bg-background p-3">
-      <Shimmer className="text-sm">Generating interface…</Shimmer>
-    </div>
-  );
-}
-
 export function GenUI({ json }: { json: string }) {
   const spec = React.useMemo(() => {
     try {
@@ -333,10 +290,14 @@ export function GenUI({ json }: { json: string }) {
     }
   }, [json]);
 
-  // Incomplete / still-streaming / invalid spec → shimmer, never hand a partial
-  // tree to json-render (it would loop resolving missing child ids).
-  if (!specIsComplete(spec)) {
-    return <GenUILoading />;
+  // Not valid JSON / not a spec yet → show raw text. GenUI only mounts for a
+  // completed turn (RichResponse gates it off while streaming), and
+  // GenUIBoundary catches any error from a malformed spec, so no extra
+  // completeness pre-check is needed here.
+  if (!spec || typeof spec !== 'object' || !('root' in spec) || !('elements' in spec)) {
+    return (
+      <pre className="overflow-x-auto rounded bg-muted/40 p-2 text-xs text-muted-foreground">{json}</pre>
+    );
   }
 
   return (
