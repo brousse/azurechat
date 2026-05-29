@@ -258,6 +258,11 @@ export interface UserPrompt {
   companyContentEnabled?: boolean;
   codeInterpreterEnabled?: boolean;
   codeInterpreterFileIds?: string[];
+  // ISO 8601 datetime from the user's browser, including the local UTC offset
+  // (e.g. "2026-05-29T19:40:00.123+02:00"). Forwarded to the built-in `time`
+  // tool so the model can answer questions in the user's local time rather
+  // than the server's (typically UTC) clock.
+  clientDateTime?: string;
 }
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high";

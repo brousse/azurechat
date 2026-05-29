@@ -37,6 +37,24 @@ import {
 import { UpsertChatMessage } from "./chat-services/chat-message-service";
 let abortController: AbortController = new AbortController();
 
+// Formats a Date as an ISO 8601 string with the browser's local UTC offset
+// (e.g. "2026-05-29T19:40:00.123+02:00"). Unlike Date#toISOString (which is
+// always UTC, suffixed with "Z"), this preserves the user's local time and
+// offset so the model can answer time-of-day questions in their timezone.
+function localISOWithOffset(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offsetMin = -d.getTimezoneOffset(); // positive east of UTC
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(offsetMin);
+  const offset = `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `.${String(d.getMilliseconds()).padStart(3, "0")}` +
+    offset
+  );
+}
+
 type chatStatus = "idle" | "loading" | "file upload";
 type chatPhase = 'idle' | 'submitted' | 'streaming' | 'error';
 
@@ -420,6 +438,12 @@ class ChatState {
         method: "POST",
         body: formData,
         signal: controller.signal,
+        headers: {
+          // Send the user's local datetime as an ISO 8601 string with the
+          // browser's UTC offset, so the server-side `time` tool can report
+          // the user's local time rather than the server's clock.
+          "x-client-datetime": localISOWithOffset(new Date()),
+        },
       });
 
       if (!response.ok) {

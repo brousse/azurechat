@@ -350,7 +350,10 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
     signal: signal,
     openaiInstance: openaiInstance,
     requestOptions: requestOptions,
-    headers: extensionHeaders, // Pass extension headers to conversation context
+    headers: {
+      ...extensionHeaders,
+      ...(props.clientDateTime ? { "x-client-datetime": props.clientDateTime } : {}),
+    }, // Pass extension headers + client-provided context to conversation
   };
 
   // Build initial conversation input

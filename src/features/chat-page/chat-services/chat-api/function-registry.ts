@@ -536,18 +536,16 @@ async function searchSubAgent(
 //   2. Time awareness — the current date was removed from the system prompt
 //      (which would otherwise invalidate the cache every UTC midnight). The
 //      model can call this tool on demand whenever it needs the current
-//      datetime. Name and description are intentionally tiny to save tokens.
-async function getCurrentTime() {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const offsetMin = -now.getTimezoneOffset(); // positive east of UTC
-  const sign = offsetMin >= 0 ? "+" : "-";
-  const absMin = Math.abs(offsetMin);
-  const offset = `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
-  const datetime =
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
-    `T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}` +
-    offset;
+//      datetime.
+//
+// The datetime is supplied by the browser as an ISO 8601 string with the
+// user's local UTC offset (e.g. "2026-05-29T19:40:00.123+02:00"), forwarded
+// via the `x-client-datetime` header. We just return it verbatim — the ISO
+// string already encodes the offset, so no extra timezone field is needed.
+// If the header is missing (older clients, server-to-server calls, tests)
+// we fall back to the server's UTC time.
+async function getCurrentTime(_args: any, context?: { headers?: Record<string, string> }) {
+  const datetime = context?.headers?.["x-client-datetime"] ?? new Date().toISOString();
   return { datetime };
 }
 
