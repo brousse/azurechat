@@ -250,6 +250,11 @@ export function ChatStoreProvider({
     id: threadId,
     messages: initialAiMessages,
     transport,
+    // Batch streamed UI updates (~16 fps) instead of re-rendering on every
+    // token. Fast streaming of large content (e.g. a generative-UI spec) drove
+    // the auto-scroll Conversation into a resize→scroll→resize feedback loop
+    // ("Maximum update depth"); throttling collapses the storm of updates.
+    experimental_throttle: 60,
     // resume: true tells the SDK to call prepareReconnectToStreamRequest
     // on mount (i.e., whenever the user navigates back to this thread
     // while a stream is still in flight). The server replies 204 when

@@ -190,12 +190,22 @@ export async function POST(req: Request) {
       payload.webSearchEnabled ?? ctx.defaultTools?.webSearch ?? false,
   };
 
-  const system = buildSystemMessage({
-    staticSystemPrompt: CHAT_DEFAULT_SYSTEM_PROMPT,
-    personaMessage: ctx.thread.personaMessage ?? "",
-    today: isoDate(),
-    documentHint: ctx.documentHint,
-  });
+  const system =
+    buildSystemMessage({
+      staticSystemPrompt: CHAT_DEFAULT_SYSTEM_PROMPT,
+      personaMessage: ctx.thread.personaMessage ?? "",
+      today: isoDate(),
+      documentHint: ctx.documentHint,
+    }) +
+    // Generative UI: GPT-5.5 reliably declines a UI *tool* under tool_choice
+    // auto (it prefers to emit markdown), but it WILL emit a fenced code block.
+    // So we instruct it to emit a json-render spec as a ```genui block, which
+    // rich-response renders as a real Bühler card (see components/ai-elements).
+    "\n\n## Interactive UI (generative UI)\n" +
+    "When the user asks for a dashboard, metrics/KPIs, a comparison, a table, or a chart — or whenever numeric/structured data is clearer shown visually — render it as an interactive card by emitting a fenced code block whose language tag is `genui`, containing a json-render spec. Do NOT render that content as a markdown table.\n" +
+    'The spec is a FLAT object: { "root": "<id>", "elements": { "<id>": { "type": <Component>, "props": { … }, "children": ["<childId>"] } } }. `children` is an array of element ids; `root` is the top element id.\n' +
+    "Component types and props: Stack { direction: 'col' | 'row' }; Card { title?, description? }; Stat { label, value, delta?, trend?: 'up' | 'down' | 'flat' }; Badge { label, tone?: 'default' | 'success' | 'warning' | 'destructive' }; Table { columns: string[], rows: string[][] }; Text { content, muted? }; Chart { kind?: 'line' | 'bar', title?, data: { label: string, value: number }[] }.\n" +
+    "A short markdown sentence alongside the ```genui block is fine.";
 
   // Resolve extension IDs → full objects with header secrets for buildToolset
   type ResolvedExt = Parameters<typeof buildToolset>[0]["extensions"][number];
@@ -311,6 +321,20 @@ export async function POST(req: Request) {
   let accumulatedText = "";
   let accumulatedReasoning = "";
 
+  // Reasoning wall-clock: stamp the first reasoning-delta, and close the
+  // window at the first text-delta that follows (the model has stopped
+  // thinking and started answering). Falls back to the last reasoning-delta
+  // if the turn produced no text. Surfaced to the UI as "Thought for Ns" and
+  // persisted so the timer survives a reload.
+  let reasoningStartedAt: number | null = null;
+  let reasoningEndedAt: number | null = null;
+  let lastReasoningAt: number | null = null;
+  const computeReasoningDurationMs = (): number | undefined => {
+    if (reasoningStartedAt === null) return undefined;
+    const end = reasoningEndedAt ?? lastReasoningAt ?? reasoningStartedAt;
+    return Math.max(0, end - reasoningStartedAt);
+  };
+
   // Register the publisher BEFORE streamText so we can pass abortSignal
   // and so a fast first-chunk doesn't race a late subscriber. The
   // returned AbortController is what POST /api/chat/[id]/stop calls
@@ -357,8 +381,22 @@ export async function POST(req: Request) {
       });
     },
     onChunk: ({ chunk }) => {
+      if (chunk.type === "reasoning-delta") {
+        const now = Date.now();
+        if (reasoningStartedAt === null) reasoningStartedAt = now;
+        lastReasoningAt = now;
+        accumulatedReasoning += chunk.text;
+        return;
+      }
+      // The first NON-reasoning chunk after thinking began closes the
+      // reasoning window — this is when the model stops thinking and starts
+      // answering or calling a tool. Closing on text-delta only would fold a
+      // 40 s image-generation tool run into the "thinking" time on tool turns;
+      // closing on any non-reasoning chunk matches the live Reasoning timer.
+      if (reasoningStartedAt !== null && reasoningEndedAt === null) {
+        reasoningEndedAt = Date.now();
+      }
       if (chunk.type === "text-delta") accumulatedText += chunk.text;
-      else if (chunk.type === "reasoning-delta") accumulatedReasoning += chunk.text;
     },
     onAbort: async ({ steps }) => {
       logWarn("/api/chat streamText onAbort fired", {
@@ -390,6 +428,7 @@ export async function POST(req: Request) {
           } as unknown as Parameters<typeof persistAssistantFromFinishEvent>[0]["event"],
           modelConfig,
           fallbackInfo: fallbackInfo.fellBack ? fallbackInfo : undefined,
+          reasoningDurationMs: computeReasoningDurationMs(),
         });
       } catch (err) {
         logError("/api/chat onAbort persist failed", {
@@ -438,6 +477,7 @@ export async function POST(req: Request) {
           modelConfig,
           fallbackInfo: fallbackInfo.fellBack ? fallbackInfo : undefined,
           streamError: lastStreamError,
+          reasoningDurationMs: computeReasoningDurationMs(),
         });
         // Generate a thread title from the first user message. ctx.history
         // has just the user message we appended in loadThreadContext when
@@ -494,6 +534,7 @@ export async function POST(req: Request) {
             modelConfig,
             fallbackInfo: fallbackInfo.fellBack ? fallbackInfo : undefined,
             streamError: lastStreamError,
+            reasoningDurationMs: computeReasoningDurationMs(),
           });
         } catch (retryErr) {
           logError("/api/chat persistAssistantFromFinishEvent retry failed", {

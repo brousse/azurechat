@@ -2,10 +2,19 @@
 import React from 'react';
 import { Response } from './response';
 import { CodeBlock, CodeBlockCopyButton } from './code-block';
+import { GenUI } from './genui';
 import { resolveBlobReferenceToPath } from '@/features/chat-page/chat-services/chat-image-persistence-utils';
 
 export interface RichResponseProps {
   content: string;
+  /**
+   * True while this message's turn is still streaming. We do NOT mount the
+   * generative-UI card (json-render + recharts) mid-stream: a tall card growing
+   * inside the auto-scroll Conversation thrashes the stick-to-bottom resize
+   * loop ("Maximum update depth"). While streaming we show the raw spec block
+   * and only swap to the rendered card once the turn completes.
+   */
+  streaming?: boolean;
 }
 
 /**
@@ -55,7 +64,7 @@ function parse(content: string): Segment[] {
   return segments;
 }
 
-export const RichResponse: React.FC<RichResponseProps> = ({ content }) => {
+export const RichResponse: React.FC<RichResponseProps> = ({ content, streaming }) => {
   const segments = React.useMemo(() => parse(content), [content]);
   // If no code segments, render whole content once to preserve full markdown context
   const hasCode = segments.some(s => s.type === 'code');
@@ -67,6 +76,17 @@ export const RichResponse: React.FC<RichResponseProps> = ({ content }) => {
     <div className="flex flex-col gap-4">
       {segments.map((seg, i) => {
         if (seg.type === 'code') {
+          // Generative UI: a ```genui (or ```json-render) fenced block renders
+          // as real Bühler components, once the turn is no longer streaming
+          // (see RichResponseProps.streaming). Detection is by explicit language
+          // tag only — never by sniffing arbitrary JSON content — so a normal
+          // ```json block the user wants to read stays a code block.
+          if (
+            !streaming &&
+            (seg.language === 'genui' || seg.language === 'json-render')
+          ) {
+            return <GenUI key={i} json={seg.code} />;
+          }
           return (
             <CodeBlock key={i} code={seg.code} language={seg.language}>
               <CodeBlockCopyButton />

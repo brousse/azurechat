@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, memo } from "react";
+import { useEffect, useMemo, useRef, useState, memo, Component, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useChatSession, useChatStore, ChatStoreProvider } from "@/features/chat-page/chat-store-context";
@@ -75,6 +75,32 @@ function getToolParts(m: UIMessage) {
   return m.parts.filter(isToolPart);
 }
 
+/**
+ * Per-message error boundary. Keeps a single message that fails to render
+ * (e.g. a malformed generative-UI spec) from taking down the whole chat, and
+ * logs the React component stack to aid diagnosis.
+ */
+class MessageErrorBoundary extends Component<{ children: ReactNode; mid: string }, { err: boolean }> {
+  state = { err: false };
+  static getDerivedStateFromError() {
+    return { err: true };
+  }
+  componentDidCatch(error: Error, info: { componentStack?: string }) {
+    // eslint-disable-next-line no-console
+    console.error("chat message render error", this.props.mid, error?.message, info?.componentStack);
+  }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="p-2 text-xs text-muted-foreground">
+          This message couldn&apos;t be displayed.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ChatMessages — rendered from AI SDK UIMessage stream
 // ---------------------------------------------------------------------------
@@ -140,7 +166,7 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
 
         {messages
           .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => {
+          .map((m, idx, arr) => {
             const role = m.role as "user" | "assistant";
             const avatarSrc = role === "user"
               ? (profilePicture || "/user-icon.png")
@@ -151,12 +177,27 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
             const imageUrls = role === "user" ? getImageUrls(m) : [];
             const toolParts = role === "assistant" ? getToolParts(m) : [];
 
-            // Reasoning streaming state is not exposed by the AI SDK at the
-            // per-message granularity yet — keep the panel without the timer.
-            const reasoningMeta = { isStreaming: false, elapsed: 0 };
+            // Reasoning panel state: while the assistant turn is still
+            // streaming AND its last part is reasoning, the model is actively
+            // thinking — the Reasoning component times this live and renders
+            // "Thinking..." → "Thought for Ns". For an already-persisted turn
+            // we surface the server-measured duration carried on message
+            // metadata (set in the /api/chat onChunk timer, round-tripped via
+            // message-adapter) so the timer survives a reload.
+            const isLastMessage = idx === arr.length - 1;
+            const isReasoningStreaming =
+              isLastMessage && isStreaming && m.parts.at(-1)?.type === "reasoning";
+            const reasoningDurationMs = (
+              m.metadata as { reasoningDurationMs?: number } | undefined
+            )?.reasoningDurationMs;
+            const reasoningDurationSec =
+              reasoningDurationMs && reasoningDurationMs > 0
+                ? Math.max(1, Math.round(reasoningDurationMs / 1000))
+                : undefined;
 
             return (
               <div className="flex flex-col gap-4" key={m.id}>
+                <MessageErrorBoundary mid={m.id}>
                 <Message key={m.id} from={role}>
                   <div className="flex flex-col gap-0.5 w-full">
                     <MessageContent>
@@ -173,14 +214,14 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
 
                       {/* Reasoning block */}
                       {reasoningText && role === "assistant" && (
-                        <Reasoning isStreaming={reasoningMeta.isStreaming} defaultOpen>
-                          <ReasoningTrigger>
-                            {reasoningMeta.isStreaming
-                              ? "Thinking..."
-                              : reasoningMeta.elapsed
-                              ? `Thought for ${reasoningMeta.elapsed}s`
-                              : "Reasoning"}
-                          </ReasoningTrigger>
+                        <Reasoning
+                          isStreaming={isReasoningStreaming}
+                          defaultOpen={isReasoningStreaming}
+                          {...(reasoningDurationSec !== undefined
+                            ? { duration: reasoningDurationSec }
+                            : {})}
+                        >
+                          <ReasoningTrigger />
                           <ReasoningContent>{reasoningText}</ReasoningContent>
                         </Reasoning>
                       )}
@@ -196,7 +237,10 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
 
                       {/* Message text */}
                       {(role === "assistant" || role === "user") && (
-                        <RichResponse content={text} />
+                        <RichResponse
+                          content={text}
+                          streaming={isLastMessage && isStreaming}
+                        />
                       )}
                     </MessageContent>
 
@@ -221,6 +265,7 @@ const ChatMessages = memo(function ChatMessages({ profilePicture }: { profilePic
                     )}
                   </div>
                 </Message>
+                </MessageErrorBoundary>
               </div>
             );
           })}

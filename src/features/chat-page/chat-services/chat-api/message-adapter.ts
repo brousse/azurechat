@@ -148,10 +148,14 @@ export function uiMessagesFromChatMessages(rows: ChatMessageModel[]): UIMessage[
       const msg: UIMessage = {
         id: row.id,
         role: "assistant",
-        // Carry reasoningState and threadId through metadata so round-trip preserves them.
+        // Carry reasoningState, reasoningDurationMs and threadId through
+        // metadata so round-trip preserves them.
         metadata: {
           threadId: row.threadId,
           ...(row.reasoningState !== undefined && { reasoningState: row.reasoningState }),
+          ...(row.reasoningDurationMs !== undefined && {
+            reasoningDurationMs: row.reasoningDurationMs,
+          }),
         },
         parts,
       };
@@ -338,6 +342,8 @@ export function chatMessagesFromUIMessages(
       const reasoningContent = reasoningParts.map((p) => p.text).join("\n\n") || undefined;
       const meta = (msg.metadata ?? {}) as Record<string, unknown>;
       const reasoningState = meta.reasoningState;
+      const reasoningDurationMs =
+        typeof meta.reasoningDurationMs === "number" ? meta.reasoningDurationMs : undefined;
 
       rows.push({
         ...baseRow(),
@@ -346,6 +352,7 @@ export function chatMessagesFromUIMessages(
         content,
         ...(reasoningContent !== undefined && { reasoningContent }),
         ...(reasoningState !== undefined && { reasoningState }),
+        ...(reasoningDurationMs !== undefined && { reasoningDurationMs }),
       });
 
       // Each DynamicToolUIPart → one tool row.

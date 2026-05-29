@@ -203,6 +203,12 @@ export interface ChatMessageModel {
   multiModalImage?: string;
   multiModalImages?: string[];
   reasoningContent?: string;
+  /**
+   * Wall-clock the model spent reasoning this turn, in milliseconds. Measured
+   * server-side in the /api/chat onChunk timer and round-tripped via the
+   * message-adapter so the UI's "Thought for Ns" label survives a reload.
+   */
+  reasoningDurationMs?: number;
   toolCallHistory?: Array<{ name: string; arguments: string; result?: string; timestamp: Date }>;
   type: typeof MESSAGE_ATTRIBUTE;
   reasoningState?: any;

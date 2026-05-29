@@ -352,6 +352,7 @@ export function buildAssistantUIMessage<TOOLS extends ToolSet>(
     readonly toolResults: ReadonlyArray<TypedToolResult<TOOLS>>;
   },
   id: string,
+  reasoningDurationMs?: number,
 ): UIMessage {
   const parts: UIMessage["parts"] = [];
 
@@ -385,7 +386,15 @@ export function buildAssistantUIMessage<TOOLS extends ToolSet>(
     parts.push(tool);
   }
 
-  return { id, role: "assistant", parts };
+  // Carry the reasoning wall-clock on metadata (same channel as
+  // reasoningState) so the message-adapter persists it and the UI can render
+  // "Thought for Ns" after a reload, not just live.
+  const metadata =
+    reasoningDurationMs !== undefined && reasoningDurationMs > 0
+      ? { reasoningDurationMs }
+      : undefined;
+
+  return { id, role: "assistant", parts, ...(metadata && { metadata }) };
 }
 
 export interface PersistAssistantFromFinishParams<TOOLS extends ToolSet> {
@@ -397,6 +406,8 @@ export interface PersistAssistantFromFinishParams<TOOLS extends ToolSet> {
   fallbackInfo?: PersistPayload["fallbackInfo"];
   /** Stable id for the new assistant row; defaults to a generated one. */
   messageId?: string;
+  /** Wall-clock the model spent reasoning this turn (ms), for the UI timer. */
+  reasoningDurationMs?: number;
   /**
    * Provider error captured by streamText's onError (the AI SDK emits onError
    * but still calls onFinish with finishReason="error"). When present, the
@@ -421,6 +432,7 @@ export async function persistAssistantFromFinishEvent<TOOLS extends ToolSet>({
   fallbackInfo,
   messageId,
   streamError,
+  reasoningDurationMs,
 }: PersistAssistantFromFinishParams<TOOLS>): Promise<void> {
   // Detect an empty finish — Azure content-filter trips, aborted streams
   // before any output, or a model error that resolves without text/tools.
@@ -470,6 +482,7 @@ export async function persistAssistantFromFinishEvent<TOOLS extends ToolSet>({
       toolResults: ingestedToolResults as typeof event.toolResults,
     },
     messageId ?? assistantMessageIdGenerator(),
+    reasoningDurationMs,
   );
 
   // Ingest every container_file_citation source the model referenced into
