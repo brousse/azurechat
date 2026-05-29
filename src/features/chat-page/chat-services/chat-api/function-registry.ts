@@ -528,6 +528,19 @@ async function searchSubAgent(
   };
 }
 
+// Minimalistic default "time" tool. Always registered and always included in
+// the tools array sent to the Responses API. It serves two purposes:
+//   1. Cache stability — the Azure OpenAI prompt cache keys on the serialized
+//      tools array, so an ever-present, byte-identical default entry gives a
+//      stable tools prefix to key on (cache hits up).
+//   2. Time awareness — the current date was removed from the system prompt
+//      (which would otherwise invalidate the cache every UTC midnight). The
+//      model can call this tool on demand whenever it needs the current
+//      datetime. Name and description are intentionally tiny to save tokens.
+async function getCurrentTime() {
+  return { datetime: new Date().toISOString() };
+}
+
 // Register built-in functions (will be called when needed)
 async function ensureBuiltInFunctionsRegistered() {
   if (!functionRegistry.has("search_documents")) {
@@ -541,6 +554,9 @@ async function ensureBuiltInFunctionsRegistered() {
   }
   if (!functionRegistry.has("search_sub_agent")) {
     await registerFunction("search_sub_agent", searchSubAgent);
+  }
+  if (!functionRegistry.has("time")) {
+    await registerFunction("time", getCurrentTime);
   }
 }
 
@@ -638,6 +654,16 @@ export async function getToolByName(toolName: string): Promise<FunctionDefinitio
             description: "Search keyword or phrase to find relevant agents. Matches against agent names and descriptions."
           }
         }
+      },
+      strict: true as const
+    },
+    {
+      type: "function" as const,
+      name: "time",
+      description: "Returns current datetime.",
+      parameters: {
+        type: "object",
+        properties: {}
       },
       strict: true as const
     }
