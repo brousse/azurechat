@@ -18,7 +18,7 @@ import {
 } from "./function-registry";
 import { OpenAIResponsesStream } from "./openai-responses-stream";
 import { createConversationState, startConversation, continueConversation, ConversationState } from "./conversation-manager";
-import { buildSystemMessage, isoDate, sortFunctionTools } from "./prompt-builder";
+import { buildSystemMessage, sortFunctionTools } from "./prompt-builder";
 import { FindAllExtensionForCurrentUserAndIds, FindSecureHeaderValue } from "@/features/extensions-page/extension-services/extension-service";
 import { reportUserChatMessage } from "@/features/common/services/chat-metrics-service";
 import { CheckLimits } from "@/features/common/services/usage-service";
@@ -127,7 +127,6 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
   currentChatThread.personaMessage = buildSystemMessage({
     staticSystemPrompt: CHAT_DEFAULT_SYSTEM_PROMPT,
     personaMessage: currentChatThread.personaMessage,
-    today: isoDate(),
     documentHint,
   });
 
@@ -143,6 +142,22 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
 
   // Get available functions (built-in + dynamic extensions)
   const { tools, extensionHeaders } = await _getAvailableTools(currentChatThread);
+
+  // Always include the minimalistic default "time" tool. This guarantees the
+  // tools array is never empty and contains a byte-identical entry across
+  // every request, which gives the Azure OpenAI prompt cache a stable tools
+  // prefix to key on (improving cache hit rate). It also lets the model fetch
+  // the current datetime on demand — the date was removed from the system
+  // prompt to avoid invalidating the cache at every midnight rollover. Name
+  // and description are deliberately tiny to minimize token overhead.
+  const defaultTool = await getToolByName("time");
+  if (defaultTool) {
+    tools.push(defaultTool);
+  } else {
+    // Should never happen — `time` is statically defined in the registry —
+    // but log loudly if it does so the cache-stability regression is visible.
+    logError("Default 'time' tool missing from registry; tools-array stability degraded");
+  }
   // Add search_documents tool if any documents are available (chat or persona)
   if (hasAnyDocuments) {
     const searchDocumentsTool = await getToolByName("search_documents");
@@ -335,7 +350,10 @@ export const ChatAPIResponse = async (props: UserPrompt, signal: AbortSignal) =>
     signal: signal,
     openaiInstance: openaiInstance,
     requestOptions: requestOptions,
-    headers: extensionHeaders, // Pass extension headers to conversation context
+    headers: {
+      ...extensionHeaders,
+      ...(props.clientDateTime ? { "x-client-datetime": props.clientDateTime } : {}),
+    }, // Pass extension headers + client-provided context to conversation
   };
 
   // Build initial conversation input

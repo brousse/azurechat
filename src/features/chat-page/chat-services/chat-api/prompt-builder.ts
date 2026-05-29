@@ -5,8 +5,6 @@
 export interface PromptBuilderInputs {
   staticSystemPrompt: string;
   personaMessage: string;
-  /** ISO-8601 date string, e.g. "2026-04-30". Locale-stable. */
-  today: string;
   /** Optional document hint block. Empty string when no documents are attached. */
   documentHint?: string;
 }
@@ -16,18 +14,14 @@ export interface PromptBuilderInputs {
  * identical inputs MUST yield byte-for-byte identical output across processes,
  * pods, and locales. The Azure OpenAI prompt cache keys on the first 1024 tokens
  * of input, so any drift here translates directly into cache misses.
+ *
+ * The current date is intentionally NOT included here: injecting `today` would
+ * invalidate the prompt cache at every UTC midnight rollover and prevent any
+ * cross-day reuse. Time-sensitive answers should rely on tool calls instead.
  */
 export function buildSystemMessage(inputs: PromptBuilderInputs): string {
-  const { staticSystemPrompt, personaMessage, today, documentHint = "" } = inputs;
-  return `${staticSystemPrompt} \n\nToday's Date: ${today}${documentHint}\n\n${personaMessage}`;
-}
-
-/**
- * Format today's date using ISO-8601 calendar date (`YYYY-MM-DD`). Independent
- * of process locale (unlike `toLocaleDateString()`).
- */
-export function isoDate(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  const { staticSystemPrompt, personaMessage, documentHint = "" } = inputs;
+  return `${staticSystemPrompt}${documentHint}\n\n${personaMessage}`;
 }
 
 /**

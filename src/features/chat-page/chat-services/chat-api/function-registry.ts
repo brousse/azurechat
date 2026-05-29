@@ -528,6 +528,27 @@ async function searchSubAgent(
   };
 }
 
+// Minimalistic default "time" tool. Always registered and always included in
+// the tools array sent to the Responses API. It serves two purposes:
+//   1. Cache stability — the Azure OpenAI prompt cache keys on the serialized
+//      tools array, so an ever-present, byte-identical default entry gives a
+//      stable tools prefix to key on (cache hits up).
+//   2. Time awareness — the current date was removed from the system prompt
+//      (which would otherwise invalidate the cache every UTC midnight). The
+//      model can call this tool on demand whenever it needs the current
+//      datetime.
+//
+// The datetime is supplied by the browser as an ISO 8601 string with the
+// user's local UTC offset (e.g. "2026-05-29T19:40:00.123+02:00"), forwarded
+// via the `x-client-datetime` header. We just return it verbatim — the ISO
+// string already encodes the offset, so no extra timezone field is needed.
+// If the header is missing (older clients, server-to-server calls, tests)
+// we fall back to the server's UTC time.
+async function getCurrentTime(_args: any, context?: { headers?: Record<string, string> }) {
+  const datetime = context?.headers?.["x-client-datetime"] ?? new Date().toISOString();
+  return { datetime };
+}
+
 // Register built-in functions (will be called when needed)
 async function ensureBuiltInFunctionsRegistered() {
   if (!functionRegistry.has("search_documents")) {
@@ -541,6 +562,9 @@ async function ensureBuiltInFunctionsRegistered() {
   }
   if (!functionRegistry.has("search_sub_agent")) {
     await registerFunction("search_sub_agent", searchSubAgent);
+  }
+  if (!functionRegistry.has("time")) {
+    await registerFunction("time", getCurrentTime);
   }
 }
 
@@ -638,6 +662,16 @@ export async function getToolByName(toolName: string): Promise<FunctionDefinitio
             description: "Search keyword or phrase to find relevant agents. Matches against agent names and descriptions."
           }
         }
+      },
+      strict: true as const
+    },
+    {
+      type: "function" as const,
+      name: "time",
+      description: "Returns current datetime.",
+      parameters: {
+        type: "object",
+        properties: {}
       },
       strict: true as const
     }

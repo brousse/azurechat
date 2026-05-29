@@ -18,6 +18,7 @@ export async function POST(req: Request) {
       ...JSON.parse(content),
       multimodalImage: multimodalImages[0] || "",
       multimodalImages,
+      clientDateTime: req.headers?.get?.("x-client-datetime") ?? undefined,
     };
 
     return await ChatAPIEntry(userPrompt, req.signal);
