@@ -18,6 +18,7 @@ const mockResolveModelAndLimits = vi.fn();
 const mockBuildToolset = vi.fn();
 const mockPersistAssistant = vi.fn();
 const mockResolveAzureModel = vi.fn();
+const mockResolveProvider = vi.fn();
 const mockFindAllExtensions = vi.fn();
 
 vi.mock("@/features/chat-page/chat-services/chat-api/thread-context", () => ({
@@ -36,11 +37,7 @@ vi.mock("@/features/chat-page/chat-services/models/provider", () => ({
   resolveAzureModel: (...a: unknown[]) => mockResolveAzureModel(...a),
 }));
 vi.mock("@/features/chat-page/chat-services/models/provider-seam", () => ({
-  resolveProvider: (..._a: unknown[]) => ({
-    model: {},
-    builtInTools: {},
-    providerOptions: { openai: { promptCacheKey: "test", store: false } },
-  }),
+  resolveProvider: (...a: unknown[]) => mockResolveProvider(...a),
   getFileIdsSignature: (ids: string[] | undefined) =>
     !ids || ids.length === 0 ? "" : [...new Set(ids)].sort().join(","),
 }));
@@ -121,9 +118,15 @@ const CTX = {
   attachedFiles: [],
 };
 const MODEL_RESULT = {
-  modelConfig: { id: "gpt-4o", supportsReasoning: false, pricing: undefined },
+  modelConfig: {
+    id: "gpt-4o",
+    supportsReasoning: false,
+    supportsResponsesAPI: true,
+    pricing: undefined,
+  },
   fallbackInfo: { fellBack: false },
   effectiveReasoningEffort: undefined,
+  selectedModel: "gpt-4o",
 };
 
 function makeRequest(contentObj: object, imageFields: string[] = []) {
@@ -151,6 +154,11 @@ describe("/api/chat route (AI SDK v6)", () => {
     mockBuildToolset.mockResolvedValue({});
     mockPersistAssistant.mockResolvedValue(undefined);
     mockResolveAzureModel.mockReturnValue({});
+    mockResolveProvider.mockReturnValue({
+      model: {},
+      builtInTools: {},
+      providerOptions: { openai: { promptCacheKey: "test", store: false } },
+    });
     mockFindAllExtensions.mockResolvedValue({ status: "OK", response: [] });
     mockToUIMessageStreamResponse.mockReturnValue(
       new Response("stream", {
@@ -180,6 +188,51 @@ describe("/api/chat route (AI SDK v6)", () => {
       expect.objectContaining({
         threadId: "t1",
         event: expect.objectContaining({ text: "hi" }),
+      }),
+    );
+  });
+
+  it("passes the resolved effective model into resolveProvider (no-regression: effective == selected)", async () => {
+    const req = makeRequest({ message: "hello", id: "t1" });
+    await POST(req);
+    expect(mockResolveProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: "gpt-4o" }),
+    );
+  });
+
+  it("threads a downgraded model from resolveModelAndLimits into resolveProvider (not the raw payload)", async () => {
+    // Simulate a cap/intent downgrade: the selected model differs from the
+    // payload/thread model. The provider seam must receive the downgraded id.
+    mockResolveModelAndLimits.mockResolvedValue({
+      ...MODEL_RESULT,
+      modelConfig: { id: "gpt-5.4-mini", supportsReasoning: false, supportsResponsesAPI: true, pricing: undefined },
+      selectedModel: "gpt-5.4-mini",
+      fallbackInfo: { fellBack: true, reason: "cap", originalModel: "gpt-4o", fallbackModel: "gpt-5.4-mini" },
+    });
+    const req = makeRequest({ message: "hello", id: "t1", selectedModel: "gpt-4o" });
+    await POST(req);
+    expect(mockResolveProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: "gpt-5.4-mini" }),
+    );
+  });
+
+  it("strips built-in tool toggles when the effective model lacks the Responses API (Foundry downgrade)", async () => {
+    mockResolveModelAndLimits.mockResolvedValue({
+      ...MODEL_RESULT,
+      modelConfig: { id: "DeepSeek-V4-Pro", supportsReasoning: false, supportsResponsesAPI: false, pricing: undefined },
+      selectedModel: "DeepSeek-V4-Pro",
+    });
+    const req = makeRequest({
+      message: "hello",
+      id: "t1",
+      webSearchEnabled: true,
+      codeInterpreterEnabled: true,
+    });
+    await POST(req);
+    expect(mockResolveProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: "DeepSeek-V4-Pro",
+        toggles: { codeInterpreter: false, imageGeneration: false, webSearch: false },
       }),
     );
   });

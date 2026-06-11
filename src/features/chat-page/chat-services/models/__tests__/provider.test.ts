@@ -4,10 +4,10 @@ import {
   reset,
   SERVICE_KEYS,
 } from "@/features/common/services/service-container";
-import { resolveAzureModel } from "../provider";
+import { resolveAzureModel, resolveFoundryModel, resolveAnthropicModel } from "../provider";
 import { MODEL_CONFIGS } from "../../models";
 import type { ChatModel } from "../../models";
-import type { AiProviderFn } from "../provider";
+import type { AiProviderFn, FoundryProviderFn, AnthropicProviderFn } from "../provider";
 
 describe("resolveAzureModel — DI seam", () => {
   beforeEach(() => {
@@ -46,5 +46,57 @@ describe("resolveAzureModel — DI seam", () => {
     (MODEL_CONFIGS[modelId] as any).deploymentName = undefined;
 
     expect(() => resolveAzureModel(modelId)).toThrow(/no deploymentName/);
+  });
+});
+
+describe("resolveFoundryModel — DI seam", () => {
+  beforeEach(() => {
+    reset();
+    const fakeFactory = (): FoundryProviderFn =>
+      (deploymentName: string) =>
+        ({ modelId: deploymentName, provider: "foundry-fake" }) as any;
+    register(SERVICE_KEYS.foundryProvider, fakeFactory);
+  });
+
+  it("returns a model whose modelId matches the Foundry deployment name", () => {
+    const modelId: ChatModel = "DeepSeek-V4-Pro";
+    (MODEL_CONFIGS[modelId] as any).deploymentName = "deepseek-test-deploy";
+
+    const result = resolveFoundryModel(modelId) as any;
+
+    expect(result.modelId).toBe("deepseek-test-deploy");
+  });
+
+  it("throws when no deploymentName is configured for the Foundry model", () => {
+    const modelId: ChatModel = "Kimi-K2.6";
+    (MODEL_CONFIGS[modelId] as any).deploymentName = undefined;
+
+    expect(() => resolveFoundryModel(modelId)).toThrow(/no deploymentName/);
+  });
+});
+
+describe("resolveAnthropicModel — DI seam", () => {
+  beforeEach(() => {
+    reset();
+    const fakeFactory = (): AnthropicProviderFn =>
+      (deploymentName: string) =>
+        ({ modelId: deploymentName, provider: "anthropic-fake" }) as any;
+    register(SERVICE_KEYS.anthropicProvider, fakeFactory);
+  });
+
+  it("returns a model whose modelId matches the Anthropic deployment name", () => {
+    const modelId: ChatModel = "claude-opus-4-8";
+    (MODEL_CONFIGS[modelId] as any).deploymentName = "claude-opus-4-8";
+
+    const result = resolveAnthropicModel(modelId) as any;
+
+    expect(result.modelId).toBe("claude-opus-4-8");
+  });
+
+  it("throws when no deploymentName is configured for the Anthropic model", () => {
+    const modelId: ChatModel = "claude-sonnet-4-6-2";
+    (MODEL_CONFIGS[modelId] as any).deploymentName = undefined;
+
+    expect(() => resolveAnthropicModel(modelId)).toThrow(/no deploymentName/);
   });
 });

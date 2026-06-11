@@ -20,6 +20,10 @@ interface UsageData {
     totalTokens: number;
     totalCostUsd: number;
   };
+  limits?: {
+    dailyUsd: number;
+    weeklyUsd: number;
+  };
 }
 
 const formatTokens = (n: number) => {
@@ -59,6 +63,43 @@ function getWeeklyResetLabel(): string {
   if (days > 1) return `Fri 17:00 (${days}d)`;
   if (days === 1) return `1d ${hours}h`;
   return `${hours}h`;
+}
+
+/**
+ * Usage-toward-budget bar. Hidden when no limit is configured (limit <= 0).
+ * Green under 80%, amber 80–99%, red once the cap is hit (the point at which
+ * the user is auto-downgraded to lower-cost models).
+ */
+function BudgetBar({ spent, limit }: { spent: number; limit: number }) {
+  if (!limit || limit <= 0) return null;
+  const pct = Math.min(100, (spent / limit) * 100);
+  const over = spent >= limit;
+  const near = !over && pct >= 80;
+  const barColor = over ? "bg-destructive" : near ? "bg-amber-500" : "bg-primary";
+  return (
+    <div className="mt-2">
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Budget</span>
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          ${spent.toFixed(2)} / ${limit.toFixed(2)}
+        </span>
+      </div>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+      </div>
+      {over && (
+        <p className="mt-1 text-[10px] leading-tight text-destructive">
+          Limit reached — now using lower-cost models.
+        </p>
+      )}
+    </div>
+  );
 }
 
 export const UserUsage = () => {
@@ -109,6 +150,7 @@ export const UserUsage = () => {
               <p className="tabular-nums font-medium text-sm">{formatCost(usage.daily.totalCostUsd)}</p>
             </div>
           </div>
+          <BudgetBar spent={usage.daily.totalCostUsd} limit={usage.limits?.dailyUsd ?? 0} />
         </DropdownMenuLabel>
 
         {/* Weekly */}
@@ -130,6 +172,7 @@ export const UserUsage = () => {
                   <p className="tabular-nums font-medium text-sm">{formatCost(usage.weekly.totalCostUsd)}</p>
                 </div>
               </div>
+              <BudgetBar spent={usage.weekly.totalCostUsd} limit={usage.limits?.weeklyUsd ?? 0} />
             </DropdownMenuLabel>
           </>
         )}

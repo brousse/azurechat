@@ -44,7 +44,7 @@ import {
   FindSecureHeaderValue,
 } from "@/features/extensions-page/extension-services/extension-service";
 import { logError, logInfo, logWarn } from "@/features/common/services/logger";
-import { DEFAULT_MODEL, type UserPrompt } from "@/features/chat-page/chat-services/models";
+import { type UserPrompt } from "@/features/chat-page/chat-services/models";
 
 // Allow streaming responses to run for up to 10 minutes (600 seconds)
 export const maxDuration = 600;
@@ -170,7 +170,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const { modelConfig, fallbackInfo, effectiveReasoningEffort } =
+  // `effectiveModel` is the model that will actually run after limit/cap and
+  // intent downgrades — NOT necessarily payload.selectedModel. `modelConfig`
+  // is the config for that same effective model (invariant:
+  // modelConfig.id === effectiveModel), so cost, reasoning support, and the
+  // provider seam must all be driven from these, never re-derived from the
+  // raw payload/thread (doing so was the bug where a downgrade changed cost
+  // but not the model that actually ran).
+  const { modelConfig, fallbackInfo, effectiveReasoningEffort, selectedModel: effectiveModel } =
     await resolveModelAndLimits(payload, ctx.thread);
 
   // Resolve effective tool toggles up-front: per-request payload overrides the
@@ -187,6 +194,30 @@ export async function POST(req: Request) {
     webSearch:
       payload.webSearchEnabled ?? ctx.defaultTools?.webSearch ?? false,
   };
+
+  // Gate built-in tools by what the effective model's provider can actually
+  // host. The provider seam owns the concrete tool wiring; here we only decide
+  // which toggles to forward:
+  //   - azure (Responses API): all built-ins (code_interpreter / image_gen /
+  //     web_search).
+  //   - anthropic (Messages API): web search maps to Claude's NATIVE web-search
+  //     tool. Code execution / image gen are NOT forwarded yet (code execution
+  //     needs the separate Anthropic Files API — deferred).
+  //   - foundry (Chat Completions): no server tools; the seam ignores toggles.
+  // Custom registry tools (RAG, sub-agents, extensions) are unaffected.
+  const effectiveToolsSafe = modelConfig.supportsResponsesAPI
+    ? effectiveTools
+    : modelConfig.provider === "anthropic"
+      ? { codeInterpreter: false, imageGeneration: false, webSearch: effectiveTools.webSearch }
+      : { codeInterpreter: false, imageGeneration: false, webSearch: false };
+  const strippedToolNames = (Object.keys(effectiveTools) as (keyof typeof effectiveTools)[])
+    .filter((k) => effectiveTools[k] && !effectiveToolsSafe[k]);
+  if (strippedToolNames.length > 0) {
+    logWarn("/api/chat stripped built-in tools the effective model can't host", {
+      effectiveModel,
+      strippedToolNames,
+    });
+  }
 
   const system =
     buildSystemMessage({
@@ -247,7 +278,7 @@ export async function POST(req: Request) {
   const requestedCiSignature = getFileIdsSignature(requestedCiFileIds);
   const persistedCiSignature = ctx.thread.codeInterpreterFileIdsSignature ?? "";
   const ciFilesChanged = requestedCiSignature !== persistedCiSignature;
-  if (effectiveTools.codeInterpreter && ciFilesChanged) {
+  if (effectiveToolsSafe.codeInterpreter && ciFilesChanged) {
     try {
       await UpdateChatThreadCodeInterpreterContainer(
         ctx.thread.id,
@@ -274,12 +305,12 @@ export async function POST(req: Request) {
   // through the provider seam so Anthropic / future providers slot in
   // without touching this route handler (architect2 SEV-2 B10).
   const resolved = resolveProvider({
-    modelId: payload.selectedModel ?? ctx.thread.selectedModel ?? DEFAULT_MODEL,
+    modelId: effectiveModel,
     thread: {
       id: ctx.thread.id,
       codeInterpreterContainerId: ctx.thread.codeInterpreterContainerId,
     },
-    toggles: effectiveTools,
+    toggles: effectiveToolsSafe,
     reasoning: {
       supported: modelConfig.supportsReasoning,
       effort: effectiveReasoningEffort,
@@ -288,7 +319,7 @@ export async function POST(req: Request) {
   });
   logInfo("/api/chat builtInTools", {
     keys: Object.keys(resolved.builtInTools),
-    effectiveTools,
+    effectiveTools: effectiveToolsSafe,
   });
 
   // Cast through `ToolSet` (the AI SDK's public interface) rather than

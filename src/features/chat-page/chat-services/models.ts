@@ -16,7 +16,15 @@ export type ChatModel =
   | "gpt-5.5"
   | "gpt-5.4"
   | "gpt-5.4-mini"
-  | "gpt-5.3-chat";
+  | "gpt-5.3-chat"
+  // Foundry-hosted (OpenAI-compatible) low-cost models, used as downgrade
+  // targets. Served via the "foundry" provider seam, not Azure Responses.
+  | "DeepSeek-V4-Pro"
+  | "Kimi-K2.6"
+  // Anthropic Claude models served via the Azure /anthropic surface
+  // (Messages API) through the "anthropic" provider seam.
+  | "claude-opus-4-8"
+  | "claude-sonnet-4-6-2";
 
 export interface ModelPricing {
   inputPerMillion: number;
@@ -29,13 +37,27 @@ export interface ModelPricing {
  * provider-seam to a different concrete implementation:
  *
  *   - "azure":     @ai-sdk/azure → OpenAI Responses API (default).
- *   - "anthropic": @ai-sdk/anthropic (planned; provider-seam.ts throws
- *                  a descriptive error until the branch is wired).
+ *   - "anthropic": @ai-sdk/anthropic → Azure /anthropic Messages API.
+ *   - "foundry":   @ai-sdk/openai createOpenAI() pointed at the Bühler
+ *                  Azure AI Foundry OpenAI-compatible endpoint. Chat
+ *                  Completions only — no Responses-API tools/reasoning.
  *
  * Absence is treated as "azure" for backward compatibility with existing
  * MODEL_CONFIGS entries.
  */
-export type ModelProvider = "azure" | "anthropic";
+export type ModelProvider = "azure" | "anthropic" | "foundry";
+
+/**
+ * Capability badges shown next to a model in the picker.
+ *   - "vision":    accepts image input
+ *   - "imageGen":  can generate images
+ *   - "webSearch": can search the web
+ *   - "code":      can run code (code interpreter / Python)
+ * NOTE: imageGen / webSearch / code are Azure-Responses built-in tools and are
+ * only callable by provider "azure" models. Anthropic/Foundry models that
+ * route through Chat/Messages APIs can't invoke those built-ins.
+ */
+export type ModelCapability = "vision" | "imageGen" | "webSearch" | "code";
 
 export interface ModelConfig {
   id: ChatModel;
@@ -56,6 +78,19 @@ export interface ModelConfig {
   fallbackModel?: ChatModel;
   dailyTokenLimit?: number;
   dailyCostLimit?: number;
+  /**
+   * When true, this model may be used as an automatic hard-cap downgrade
+   * target (see downgrade-config.ts / budget-service.ts). The set of
+   * eligible models is chosen cheapest-first at cap time.
+   */
+  hardCapEligible?: boolean;
+  /**
+   * When true, the model is hidden from the user-facing picker (/api/models)
+   * but can still be selected programmatically as a downgrade target.
+   */
+  hiddenFromPicker?: boolean;
+  /** Capability badges rendered in the picker (text is implicit for all). */
+  capabilities?: ModelCapability[];
 }
 
 export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
@@ -72,6 +107,7 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     pricing: { inputPerMillion: 5, outputPerMillion: 30.00, cachedInputPerMillion: 0.5 },
     contextWindow: 1050000,
     fallbackModel: "gpt-5.4-mini",
+    capabilities: ["vision", "imageGen", "webSearch", "code"],
   },
   "gpt-5.4": {
     id: "gpt-5.4",
@@ -86,6 +122,7 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     pricing: { inputPerMillion: 2.50, outputPerMillion: 15.00, cachedInputPerMillion: 0.25 },
     contextWindow: 1050000,
     fallbackModel: "gpt-5.4-mini",
+    capabilities: ["vision", "imageGen", "webSearch", "code"],
   },
   "gpt-5.4-mini": {
     id: "gpt-5.4-mini",
@@ -98,6 +135,8 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     defaultReasoningEffort: "medium",
     pricing: { inputPerMillion: 0.75, outputPerMillion: 4.50, cachedInputPerMillion: 0.075 },
     contextWindow: 400000,
+    hardCapEligible: true,
+    capabilities: ["vision", "webSearch", "code"],
   },
   "gpt-5.3-chat": {
     id: "gpt-5.3-chat",
@@ -111,8 +150,124 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     pricing: { inputPerMillion: 1.75, outputPerMillion: 14.00, cachedInputPerMillion: 0.175 },
     contextWindow: 128000,
     fallbackModel: "gpt-5.4-mini",
+    capabilities: ["vision", "webSearch", "code"],
+  },
+  // ── Foundry-hosted low-cost downgrade targets ──────────────────────────
+  // Served via the "foundry" provider seam (OpenAI-compatible Chat
+  // Completions). Chat-only: no Responses-API tools / reasoning. Hidden from
+  // the picker by default (downgrade-only). Pricing below is indicative —
+  // confirm against the Bühler Foundry contract before enabling in prod.
+  "DeepSeek-V4-Pro": {
+    id: "DeepSeek-V4-Pro",
+    name: "DeepSeek V4 Pro",
+    description: "Fast, efficient general-purpose model",
+    getInstance: () => {
+      throw new Error(
+        "Foundry models run via the provider seam (streamText), not the legacy getInstance path",
+      );
+    },
+    provider: "foundry",
+    supportsReasoning: false,
+    supportsResponsesAPI: false,
+    deploymentName: process.env.FOUNDRY_DEEPSEEK_DEPLOYMENT_NAME,
+    pricing: { inputPerMillion: 0.30, outputPerMillion: 1.20, cachedInputPerMillion: 0.03 },
+    contextWindow: 163840,
+    hardCapEligible: true,
+    capabilities: ["code", "imageGen"],
+  },
+  "Kimi-K2.6": {
+    id: "Kimi-K2.6",
+    name: "Kimi K2.6",
+    description: "Large-context conversational model",
+    getInstance: () => {
+      throw new Error(
+        "Foundry models run via the provider seam (streamText), not the legacy getInstance path",
+      );
+    },
+    provider: "foundry",
+    supportsReasoning: false,
+    supportsResponsesAPI: false,
+    deploymentName: process.env.FOUNDRY_KIMI_DEPLOYMENT_NAME,
+    pricing: { inputPerMillion: 0.15, outputPerMillion: 2.50, cachedInputPerMillion: 0.015 },
+    contextWindow: 262144,
+    hardCapEligible: true,
+    capabilities: ["vision", "imageGen", "code"],
+  },
+  // ── Anthropic Claude (Azure /anthropic Messages API) ───────────────────
+  // Premium selectable models — NOT downgrade targets (Opus is pricier than
+  // GPT-5.5). Served via the "anthropic" provider seam.
+  "claude-opus-4-8": {
+    id: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    description: "Anthropic's most capable model for complex work",
+    getInstance: () => {
+      throw new Error(
+        "Anthropic models run via the provider seam (streamText), not the legacy getInstance path",
+      );
+    },
+    provider: "anthropic",
+    supportsReasoning: false,
+    supportsResponsesAPI: false,
+    deploymentName: process.env.AZURE_ANTHROPIC_OPUS48_DEPLOYMENT_NAME,
+    pricing: { inputPerMillion: 15.0, outputPerMillion: 75.0, cachedInputPerMillion: 1.5 },
+    contextWindow: 1000000,
+    // Image input + Claude's native web search/fetch (wired in the anthropic
+    // seam). Code execution is deferred (needs the separate Anthropic Files
+    // API). Can't call the Azure built-ins (image gen etc.).
+    capabilities: ["vision", "webSearch"],
+  },
+  "claude-sonnet-4-6-2": {
+    id: "claude-sonnet-4-6-2",
+    name: "Claude Sonnet 4.6",
+    description: "Balanced Anthropic model — fast, strong general performance",
+    getInstance: () => {
+      throw new Error(
+        "Anthropic models run via the provider seam (streamText), not the legacy getInstance path",
+      );
+    },
+    provider: "anthropic",
+    supportsReasoning: false,
+    supportsResponsesAPI: false,
+    deploymentName: process.env.AZURE_ANTHROPIC_SONNET46_DEPLOYMENT_NAME,
+    pricing: { inputPerMillion: 3.0, outputPerMillion: 15.0, cachedInputPerMillion: 0.3 },
+    contextWindow: 1000000,
+    // Image input + native web search/fetch (wired in the anthropic seam).
+    // Code execution deferred (Anthropic Files API differs).
+    capabilities: ["vision", "webSearch"],
   },
 };
+
+/** Models the user can't currently select (e.g. over budget), with the reason. */
+export type DisabledModels = Partial<Record<ChatModel, { reason: string }>>;
+
+export interface ModelAvailability {
+  availableModels: Record<ChatModel, ModelConfig>;
+  disabledModels: DisabledModels;
+}
+
+/**
+ * Fetches both the selectable models and any currently-disabled ones (with a
+ * reason, e.g. a budget cap) in a single call. Falls back to all models /
+ * nothing-disabled if the API is unreachable.
+ */
+export async function getModelAvailability(): Promise<ModelAvailability> {
+  try {
+    const response = await fetch('/api/models');
+    if (!response.ok) {
+      throw new Error('Failed to fetch model availability');
+    }
+    const data = await response.json();
+    return {
+      availableModels: data.availableModels,
+      disabledModels: data.disabledModels ?? {},
+    };
+  } catch (error) {
+    logError("Error fetching model availability", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { availableModels: MODEL_CONFIGS, disabledModels: {} };
+  }
+}
 
 /**
  * Fetches available models from the server API
@@ -279,6 +434,12 @@ export interface ChatThreadModel {
   subAgentIds?: string[];
   usage?: ThreadUsage;
   defaultTools?: DefaultTools;
+  /**
+   * Conversation intent, classified once at title-creation time and sticky
+   * thereafter. Drives intent-based model downgrade (see model-selection.ts /
+   * downgrade-config.ts). Absent on threads created before this field existed.
+   */
+  intent?: ChatIntent;
 }
 
 export interface UserPrompt {
@@ -303,6 +464,19 @@ export interface UserPrompt {
 }
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+
+/**
+ * Coarse conversation-intent classes used for intent-based model downgrade.
+ * "general" is the safe catch-all (never downgraded). Classified once at
+ * title time; see chat-api-text.ts ChatApiTitleAndIntent + downgrade-config.ts.
+ */
+export type ChatIntent =
+  | "coding"
+  | "translation"
+  | "summarization"
+  | "data_analysis"
+  | "creative"
+  | "general";
 
 export interface ChatDocumentModel {
   id: string;

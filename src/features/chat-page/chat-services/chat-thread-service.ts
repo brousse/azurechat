@@ -46,7 +46,7 @@ function isValidReasoningEffort(value: string): value is ReasoningEffort {
 }
 import { redirect } from "next/navigation";
 import { RevalidateCache } from "@/features/common/navigation-helpers";
-import { ChatApiText } from "./chat-api/chat-api-text";
+import { ChatApiTitleAndIntent } from "./chat-api/chat-api-text";
 
 export const FindAllChatThreadForCurrentUser = async (): Promise<
   ServerActionResponse<Array<ChatThreadModel>>
@@ -443,20 +443,19 @@ export const UpdateChatTitle = async (
 ): Promise<ServerActionResponse<ChatThreadModel>> => {
   try {
     const response = await FindChatThreadForCurrentUser(chatThreadId);
-    const shorterPrompt = prompt.slice(0, 300);
     if (response.status === "OK") {
       const chatThread = response.response;
-      const systemPrompt = `- you will generate a short title based on the first message a user begins a conversation with
-                            - ensure it is not more than 40 characters long
-                            - the title should be a summary or keywords of the user's message
-                            - do not use quotes or colons
-                            USERPROMPT: ${shorterPrompt}`;
 
-      const name = await ChatApiText(systemPrompt);
+      // One cheap mini call returns both the title and the conversation
+      // intent. Intent is sticky on the thread and drives intent-based model
+      // downgrade (model-selection.ts). Truncation to 300 chars happens inside
+      // ChatApiTitleAndIntent.
+      const { title, intent } = await ChatApiTitleAndIntent(prompt);
 
-      if (name) {
-        chatThread.name = name;
+      if (title) {
+        chatThread.name = title;
       }
+      chatThread.intent = intent;
 
       return await UpsertChatThread(chatThread);
     }

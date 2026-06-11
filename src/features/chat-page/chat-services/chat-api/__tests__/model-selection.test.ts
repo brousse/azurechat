@@ -19,6 +19,25 @@ vi.mock("@/features/common/services/usage-service", () => ({
   CheckLimits: (...args: unknown[]) => mockCheckLimits(...args),
 }));
 
+// ── Budget service + downgrade config (new cost-control machinery) ─────────────
+const mockCheckUserBudget = vi.fn(async () => ({ exceeded: false }) as {
+  exceeded: boolean;
+  window?: "daily" | "weekly";
+  currentUsd?: number;
+  limitUsd?: number;
+});
+vi.mock("@/features/common/services/budget-service", () => ({
+  CheckUserBudget: (...args: unknown[]) => mockCheckUserBudget(...args),
+}));
+
+const mockGetDowngradeTargets = vi.fn(() => ({
+  hardCapSet: [] as string[],
+  intentByClass: {} as Record<string, string>,
+}));
+vi.mock("@/features/common/services/downgrade-config", () => ({
+  getDowngradeTargets: (...args: unknown[]) => mockGetDowngradeTargets(...args),
+}));
+
 import { resolveModelAndLimits } from "../model-selection";
 import { MODEL_CONFIGS, DEFAULT_MODEL } from "../../models";
 import type { ChatThreadModel } from "../../models";
@@ -51,6 +70,8 @@ beforeEach(() => {
   (MODEL_CONFIGS[PINNED_MODEL] as any).deploymentName = "mini-deployment-test";
   (MODEL_CONFIGS["gpt-5.5"] as any).deploymentName = "gpt55-deployment-test";
   mockCheckLimits.mockResolvedValue({ exceeded: false });
+  mockCheckUserBudget.mockResolvedValue({ exceeded: false });
+  mockGetDowngradeTargets.mockReturnValue({ hardCapSet: [], intentByClass: {} });
 });
 
 afterEach(() => {
@@ -99,11 +120,111 @@ describe("resolveModelAndLimits — limit exceeded triggers fallback", () => {
 
     expect(result.fallbackInfo.fellBack).toBe(true);
     if (result.fallbackInfo.fellBack) {
+      expect(result.fallbackInfo.reason).toBe("perModel");
       expect(result.fallbackInfo.originalModel).toBe("gpt-5.5");
       expect(result.fallbackInfo.fallbackModel).toBe("gpt-5.4-mini");
       expect(result.fallbackInfo.limitType).toBe("tokens");
     }
     expect(result.selectedModel).toBe("gpt-5.4-mini");
     expect(result.modelDeployment).toBe("mini-deployment-test");
+  });
+});
+
+describe("resolveModelAndLimits — per-user budget cap (highest precedence)", () => {
+  it("downgrades to the cheapest eligible target and OVERRIDES an explicit pick", async () => {
+    mockCheckUserBudget.mockResolvedValue({
+      exceeded: true,
+      window: "daily",
+      currentUsd: 4.2,
+      limitUsd: 3,
+    });
+    mockGetDowngradeTargets.mockReturnValue({
+      hardCapSet: ["gpt-5.4-mini"],
+      intentByClass: {},
+    });
+
+    // User explicitly picked gpt-5.5 this turn — cap must still override it.
+    const thread = makeThread({ selectedModel: "gpt-5.5" });
+    const result = await resolveModelAndLimits({ selectedModel: "gpt-5.5" }, thread);
+
+    expect(result.fallbackInfo.fellBack).toBe(true);
+    if (result.fallbackInfo.fellBack) {
+      expect(result.fallbackInfo.reason).toBe("cap");
+      expect(result.fallbackInfo.originalModel).toBe("gpt-5.5");
+      expect(result.fallbackInfo.fallbackModel).toBe("gpt-5.4-mini");
+      expect(result.fallbackInfo.limitType).toBe("cost");
+    }
+    expect(result.selectedModel).toBe("gpt-5.4-mini");
+    // Per-model CheckLimits must NOT run once the cap already downgraded.
+    expect(mockCheckLimits).not.toHaveBeenCalled();
+  });
+
+  it("does NOT downgrade when no eligible target is deployed (fail-safe)", async () => {
+    mockCheckUserBudget.mockResolvedValue({ exceeded: true, window: "weekly", currentUsd: 9, limitUsd: 7 });
+    mockGetDowngradeTargets.mockReturnValue({ hardCapSet: [], intentByClass: {} });
+
+    const thread = makeThread({ selectedModel: "gpt-5.5" });
+    const result = await resolveModelAndLimits({ selectedModel: "gpt-5.5" }, thread);
+
+    expect(result.fallbackInfo.fellBack).toBe(false);
+    expect(result.selectedModel).toBe("gpt-5.5");
+  });
+
+  it("does not 'downgrade' when the cap target equals the current model", async () => {
+    mockCheckUserBudget.mockResolvedValue({ exceeded: true, window: "daily", currentUsd: 4, limitUsd: 3 });
+    mockGetDowngradeTargets.mockReturnValue({ hardCapSet: ["gpt-5.4-mini"], intentByClass: {} });
+
+    const thread = makeThread({ selectedModel: "gpt-5.4-mini" });
+    const result = await resolveModelAndLimits({ selectedModel: "gpt-5.4-mini" }, thread);
+
+    expect(result.fallbackInfo.fellBack).toBe(false);
+    expect(result.selectedModel).toBe("gpt-5.4-mini");
+  });
+});
+
+describe("resolveModelAndLimits — intent-based downgrade", () => {
+  it("downgrades by intent when there is NO explicit pick", async () => {
+    mockGetDowngradeTargets.mockReturnValue({
+      hardCapSet: [],
+      intentByClass: { coding: "gpt-5.4-mini" },
+    });
+    // No payload.selectedModel and thread stays at DEFAULT_MODEL → not explicit.
+    const thread = makeThread({ selectedModel: DEFAULT_MODEL, intent: "coding" });
+    const result = await resolveModelAndLimits({}, thread);
+
+    expect(result.fallbackInfo.fellBack).toBe(true);
+    if (result.fallbackInfo.fellBack) {
+      expect(result.fallbackInfo.reason).toBe("intent");
+      expect(result.fallbackInfo.fallbackModel).toBe("gpt-5.4-mini");
+    }
+    expect(result.selectedModel).toBe("gpt-5.4-mini");
+  });
+
+  it("RESPECTS an explicit pick (no intent downgrade when payload.selectedModel set)", async () => {
+    mockGetDowngradeTargets.mockReturnValue({
+      hardCapSet: [],
+      intentByClass: { coding: "gpt-5.4-mini" },
+    });
+    const thread = makeThread({ selectedModel: DEFAULT_MODEL, intent: "coding" });
+    const result = await resolveModelAndLimits({ selectedModel: "gpt-5.5" }, thread);
+
+    expect(result.fallbackInfo.fellBack).toBe(false);
+    expect(result.selectedModel).toBe("gpt-5.5");
+  });
+
+  it("cap takes precedence over intent", async () => {
+    mockCheckUserBudget.mockResolvedValue({ exceeded: true, window: "daily", currentUsd: 4, limitUsd: 3 });
+    mockGetDowngradeTargets.mockReturnValue({
+      hardCapSet: ["gpt-5.4-mini"],
+      intentByClass: { coding: "gpt-5.5" },
+    });
+    const thread = makeThread({ selectedModel: DEFAULT_MODEL, intent: "coding" });
+    const result = await resolveModelAndLimits({}, thread);
+
+    expect(result.fallbackInfo.fellBack).toBe(true);
+    if (result.fallbackInfo.fellBack) {
+      expect(result.fallbackInfo.reason).toBe("cap");
+    }
+    expect(result.selectedModel).toBe("gpt-5.4-mini");
   });
 });

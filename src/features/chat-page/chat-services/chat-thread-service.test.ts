@@ -41,7 +41,7 @@ vi.mock("@/features/common/services/logger", () => ({
 }));
 
 vi.mock("@/features/chat-page/chat-services/chat-api/chat-api-text", () => ({
-  ChatApiText: vi.fn(async () => "Generated Title"),
+  ChatApiTitleAndIntent: vi.fn(async () => ({ title: "Generated Title", intent: "general" })),
 }));
 
 // ---- import after mocks ----
@@ -530,31 +530,32 @@ describe("chat-page.unit.thread-service.026 — SoftDeleteChatThreadForCurrentUs
   });
 });
 
-describe("chat-page.unit.thread-service.027 — UpdateChatTitle truncates prompt to 300 chars", () => {
-  it("systemPrompt includes only first 300 chars", async () => {
-    const { ChatApiText } = await import("./chat-api/chat-api-text");
+describe("chat-page.unit.thread-service.027 — UpdateChatTitle classifies title + intent", () => {
+  it("calls ChatApiTitleAndIntent with the prompt and persists both title and intent", async () => {
+    const { ChatApiTitleAndIntent } = await import("./chat-api/chat-api-text");
+    (ChatApiTitleAndIntent as any).mockResolvedValueOnce({ title: "My Title", intent: "coding" });
     historyContainer.item.mockImplementation(() => ({
       read: vi.fn(async () => ({ resource: makeThread() })),
     }));
-    const longPrompt = "A".repeat(1000);
-    await UpdateChatTitle("t1", longPrompt);
-    const callArg = (ChatApiText as any).mock.calls[0][0];
-    const match = callArg.match(/USERPROMPT: (.+)$/s);
-    expect(match).toBeTruthy();
-    expect(match[1].length).toBe(300);
+    await UpdateChatTitle("t1", "help me write python");
+    expect((ChatApiTitleAndIntent as any).mock.calls[0][0]).toBe("help me write python");
+    const doc = historyContainer.items.upsert.mock.calls[0][0];
+    expect(doc.name).toBe("My Title");
+    expect(doc.intent).toBe("coding");
   });
 });
 
-describe("chat-page.unit.thread-service.028 — UpdateChatTitle keeps old name when ChatApiText returns empty", () => {
-  it("preserves existing name when empty response", async () => {
-    const { ChatApiText } = await import("./chat-api/chat-api-text");
-    (ChatApiText as any).mockResolvedValueOnce("");
+describe("chat-page.unit.thread-service.028 — UpdateChatTitle keeps old name when title is empty", () => {
+  it("preserves existing name but still records intent", async () => {
+    const { ChatApiTitleAndIntent } = await import("./chat-api/chat-api-text");
+    (ChatApiTitleAndIntent as any).mockResolvedValueOnce({ title: "", intent: "general" });
     historyContainer.item.mockImplementation(() => ({
       read: vi.fn(async () => ({ resource: makeThread({ name: "Old Name" }) })),
     }));
     await UpdateChatTitle("t1", "some prompt");
     const doc = historyContainer.items.upsert.mock.calls[0][0];
     expect(doc.name).toBe("Old Name");
+    expect(doc.intent).toBe("general");
   });
 });
 

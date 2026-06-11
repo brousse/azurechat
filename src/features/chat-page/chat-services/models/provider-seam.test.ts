@@ -7,8 +7,16 @@ vi.mock("server-only", () => ({}));
 const mockResolveAzureModel = vi.fn(() => ({
   __azureModel: true,
 }));
+const mockResolveFoundryModel = vi.fn(() => ({
+  __foundryModel: true,
+}));
+const mockResolveAnthropicModel = vi.fn(() => ({
+  __anthropicModel: true,
+}));
 vi.mock("./provider", () => ({
   resolveAzureModel: (...a: unknown[]) => mockResolveAzureModel(...a),
+  resolveFoundryModel: (...a: unknown[]) => mockResolveFoundryModel(...a),
+  resolveAnthropicModel: (...a: unknown[]) => mockResolveAnthropicModel(...a),
 }));
 
 // Stub Azure built-in tool factories so we can assert which ones the
@@ -176,6 +184,88 @@ describe("provider-seam — Azure branch", () => {
     });
     const openai = r.providerOptions.openai as Record<string, unknown>;
     expect(openai.reasoningEffort).toBeUndefined();
+  });
+});
+
+describe("provider-seam — Foundry branch", () => {
+  beforeEach(() => {
+    mockResolveFoundryModel.mockClear();
+    mockResolveAzureModel.mockClear();
+  });
+
+  it("resolves Foundry models via resolveFoundryModel, NOT resolveAzureModel", () => {
+    const r = resolveProvider({
+      modelId: "DeepSeek-V4-Pro",
+      thread: baseThread,
+      toggles: offToggles,
+      reasoning: baseReasoning,
+    });
+    expect(mockResolveFoundryModel).toHaveBeenCalledWith("DeepSeek-V4-Pro");
+    expect(mockResolveAzureModel).not.toHaveBeenCalled();
+    expect((r.model as { __foundryModel?: boolean }).__foundryModel).toBe(true);
+  });
+
+  it("emits NO built-in tools (Foundry has no Azure-Responses tools)", () => {
+    const r = resolveProvider({
+      modelId: "Kimi-K2.6",
+      thread: baseThread,
+      // Even if toggles were on, Foundry must not surface azure.tools.*.
+      toggles: { codeInterpreter: true, imageGeneration: true, webSearch: true },
+      reasoning: baseReasoning,
+    });
+    expect(r.builtInTools).toEqual({});
+  });
+
+  it("emits empty providerOptions (no promptCacheKey/store/reasoning keys)", () => {
+    const r = resolveProvider({
+      modelId: "DeepSeek-V4-Pro",
+      thread: { id: "thread-xyz", codeInterpreterContainerId: undefined },
+      toggles: offToggles,
+      reasoning: { supported: true, effort: "high" },
+    });
+    expect(r.providerOptions).toEqual({});
+  });
+});
+
+describe("provider-seam — Anthropic branch", () => {
+  beforeEach(() => {
+    mockResolveAnthropicModel.mockClear();
+    mockResolveAzureModel.mockClear();
+  });
+
+  it("resolves Anthropic models via resolveAnthropicModel, NOT resolveAzureModel", () => {
+    const r = resolveProvider({
+      modelId: "claude-opus-4-8",
+      thread: baseThread,
+      toggles: offToggles,
+      reasoning: baseReasoning,
+    });
+    expect(mockResolveAnthropicModel).toHaveBeenCalledWith("claude-opus-4-8");
+    expect(mockResolveAzureModel).not.toHaveBeenCalled();
+    expect((r.model as { __anthropicModel?: boolean }).__anthropicModel).toBe(true);
+  });
+
+  it("emits no Azure-Responses keys; no built-in tools when toggles are off", () => {
+    const r = resolveProvider({
+      modelId: "claude-sonnet-4-6-2",
+      thread: { id: "thread-xyz", codeInterpreterContainerId: undefined },
+      toggles: offToggles,
+      reasoning: { supported: true, effort: "high" },
+    });
+    expect(r.builtInTools).toEqual({});
+    expect(r.providerOptions).toEqual({});
+  });
+
+  it("wires Claude NATIVE web search + web fetch when the web-search toggle is on", () => {
+    const r = resolveProvider({
+      modelId: "claude-opus-4-8",
+      thread: baseThread,
+      // code_interpreter / image_generation must NOT produce Anthropic tools.
+      toggles: { codeInterpreter: true, imageGeneration: true, webSearch: true },
+      reasoning: baseReasoning,
+    });
+    expect(Object.keys(r.builtInTools).sort()).toEqual(["web_fetch", "web_search"]);
+    expect(r.providerOptions).toEqual({});
   });
 });
 

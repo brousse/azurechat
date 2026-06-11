@@ -27,6 +27,11 @@ interface Props {
 export const ChatHeader: FC<Props> = (props) => {
   const selectedModel = useChatStore((s) => s.selectedModel);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
+  // The model the last turn actually ran on; differs from selectedModel when a
+  // budget cap / intent downgrade kicked in. Drives the selector's live label.
+  const effectiveModel = useChatStore((s) => s.lastUsageData?.model) as
+    | ChatModel
+    | undefined;
   const { messages, status } = useChatSession();
   const loading = status === "streaming" || status === "submitted";
 
@@ -61,6 +66,7 @@ export const ChatHeader: FC<Props> = (props) => {
           <div className="shrink-0">
             <ModelSelector
               selectedModel={selectedModel}
+              effectiveModel={effectiveModel}
               onModelChange={handleModelChange}
               disabled={loading}
             />

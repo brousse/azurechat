@@ -30,12 +30,14 @@
 
 import type { LanguageModelV3, JSONValue } from "@ai-sdk/provider";
 import { azure } from "@ai-sdk/azure";
-import { resolveAzureModel } from "./provider";
+import { anthropic } from "@ai-sdk/anthropic";
+import { resolveAzureModel, resolveFoundryModel, resolveAnthropicModel } from "./provider";
 import {
   MODEL_CONFIGS,
   type ChatModel,
   type ReasoningEffort,
   type ModelConfig,
+  type ModelProvider,
 } from "../models";
 import type { ChatThreadModel } from "../models";
 
@@ -111,20 +113,15 @@ export function resolveProvider(args: ResolveProviderArgs): ResolvedProvider {
 
   // ModelConfig.provider is optional today (Azure-only). Treat absence as
   // "azure" to keep existing rows working without backfill.
-  const providerTag = (config as { provider?: "azure" | "anthropic" }).provider ?? "azure";
+  const providerTag: ModelProvider = config.provider ?? "azure";
 
   switch (providerTag) {
     case "azure":
       return resolveAzureBackedProvider(args);
+    case "foundry":
+      return resolveFoundryBackedProvider(args);
     case "anthropic":
-      // Reserved for the follow-up Anthropic PR. Throw a descriptive
-      // error rather than silently fall back, so the missing wiring is
-      // surfaced when the user first picks an Anthropic model.
-      throw new Error(
-        `resolveProvider: model "${args.modelId}" is provider="anthropic", ` +
-          `but the Anthropic seam is not yet wired. Install @ai-sdk/anthropic ` +
-          `and implement the anthropic branch in provider-seam.ts.`
-      );
+      return resolveAnthropicBackedProvider(args);
     default:
       throw new Error(
         `resolveProvider: unhandled provider "${providerTag}" for model "${args.modelId}"`
@@ -193,5 +190,53 @@ function resolveAzureBackedProvider(args: ResolveProviderArgs): ResolvedProvider
     model,
     builtInTools,
     providerOptions: { openai: openaiOptions },
+  };
+}
+
+/**
+ * Foundry (OpenAI-compatible Chat Completions) seam. These models are
+ * downgrade targets only and deliberately expose NO Azure-Responses
+ * features:
+ *   - builtInTools is empty — code_interpreter / image_generation /
+ *     web_search are Azure-Responses server-side tools that don't exist on
+ *     the Foundry endpoint. (The route already strips those toggles for
+ *     non-Responses models via effectiveToolsSafe.)
+ *   - providerOptions is empty — promptCacheKey / store / reasoning* are
+ *     Azure-Responses-only keys the generic /openai/v1 endpoint may reject.
+ * Custom registry tools (RAG, sub-agents, extensions) still flow through
+ * the route's `tools` map and work normally with Chat Completions.
+ */
+function resolveFoundryBackedProvider(args: ResolveProviderArgs): ResolvedProvider {
+  return {
+    model: resolveFoundryModel(args.modelId),
+    builtInTools: {},
+    providerOptions: {},
+  };
+}
+
+/**
+ * Anthropic (Azure /anthropic Messages API) seam. Claude can't call the Azure
+ * Responses built-ins; instead it has its OWN server tools. We wire the
+ * NATIVE web-search tool when the web-search toggle is on (confirmed available
+ * on Microsoft Foundry; the SDK adds the required beta header automatically).
+ *
+ * Deferred: code execution (`codeExecution_*`) — it works, but file upload /
+ * download goes through Anthropic's Files API, which differs from the Azure
+ * one; wiring that is a separate task. Image generation isn't an Anthropic
+ * capability. Custom registry tools (RAG, sub-agents, extensions) still flow
+ * through the route's `tools` map. Reasoning/thinking options are not sent
+ * (configs are supportsReasoning:false).
+ */
+function resolveAnthropicBackedProvider(args: ResolveProviderArgs): ResolvedProvider {
+  const builtInTools: Record<string, unknown> = {};
+  if (args.toggles.webSearch) {
+    // Web search + web fetch are paired: search finds pages, fetch reads them.
+    builtInTools["web_search"] = anthropic.tools.webSearch_20260209({ maxUses: 5 });
+    builtInTools["web_fetch"] = anthropic.tools.webFetch_20260209({ maxUses: 5 });
+  }
+  return {
+    model: resolveAnthropicModel(args.modelId),
+    builtInTools,
+    providerOptions: {},
   };
 }

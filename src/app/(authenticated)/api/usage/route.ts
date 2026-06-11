@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { GetDailyUsage, GetWeeklyUsage } from "@/features/common/services/usage-service";
+import { getBudgetConfig } from "@/features/common/services/downgrade-config";
 import { logError } from "@/features/common/services/logger";
 
 export async function GET() {
@@ -8,6 +9,10 @@ export async function GET() {
       GetDailyUsage(),
       GetWeeklyUsage(),
     ]);
+
+    // Configured per-user budget caps (0 = disabled). Surfaced so the usage
+    // overview can show how close the user is to a downgrade.
+    const budget = getBudgetConfig();
 
     const weeklyTotals = weekly.reduce(
       (acc, day) => ({
@@ -27,6 +32,10 @@ export async function GET() {
       weekly: {
         totalTokens: weeklyTotals.totalInputTokens + weeklyTotals.totalOutputTokens,
         totalCostUsd: weeklyTotals.totalCostUsd,
+      },
+      limits: {
+        dailyUsd: budget.dailyUsd,
+        weeklyUsd: budget.weeklyUsd,
       },
     });
   } catch (error) {

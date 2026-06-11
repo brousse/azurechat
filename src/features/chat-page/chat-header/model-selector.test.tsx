@@ -3,12 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModelSelector } from "./model-selector";
 
-// Mock getAvailableModels to return deterministic results
+// Mock getModelAvailability to return deterministic results
+const mockGetModelAvailability = vi.fn();
 vi.mock("../chat-services/models", async () => {
   const actual = await vi.importActual<typeof import("../chat-services/models")>("../chat-services/models");
   return {
     ...actual,
-    getAvailableModels: vi.fn().mockResolvedValue(actual.MODEL_CONFIGS),
+    getModelAvailability: (...a: unknown[]) => mockGetModelAvailability(...a),
   };
 });
 
@@ -22,8 +23,13 @@ vi.mock("@/features/common/services/logger", () => ({
 describe("chat-page.unit.components.001 — ModelSelector", () => {
   const onModelChange = vi.fn();
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const { MODEL_CONFIGS } = await import("../chat-services/models");
+    mockGetModelAvailability.mockResolvedValue({
+      availableModels: MODEL_CONFIGS,
+      disabledModels: {},
+    });
   });
 
   it("renders the selected model name in the trigger button", async () => {
@@ -93,6 +99,34 @@ describe("chat-page.unit.components.001 — ModelSelector", () => {
     await userEvent.click(option);
 
     expect(onModelChange).toHaveBeenCalledWith(secondModel.id);
+  });
+
+  it("does not fire onModelChange when a budget-disabled model is clicked", async () => {
+    const { MODEL_CONFIGS } = await import("../chat-services/models");
+    mockGetModelAvailability.mockResolvedValue({
+      availableModels: MODEL_CONFIGS,
+      disabledModels: {
+        "gpt-5.5": {
+          reason: "Daily cost budget reached — only low-cost models are available until it resets.",
+        },
+      },
+    });
+
+    render(
+      <ModelSelector
+        selectedModel={"gpt-5.4-mini" as any}
+        onModelChange={onModelChange}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText("Loading models...")).not.toBeInTheDocument()
+    );
+    await userEvent.click(screen.getByRole("button"));
+
+    // gpt-5.5 is disabled (over budget) — clicking it must be a no-op.
+    await userEvent.click(screen.getByText("GPT-5.5"));
+    expect(onModelChange).not.toHaveBeenCalled();
   });
 
   it("is disabled when the disabled prop is true", async () => {

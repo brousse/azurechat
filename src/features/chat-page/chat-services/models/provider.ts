@@ -9,6 +9,8 @@
  */
 
 import { createAzure } from "@ai-sdk/azure";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import {
   register,
@@ -22,6 +24,12 @@ import { MODEL_CONFIGS, type ChatModel } from "../models";
 /** The shape stored under SERVICE_KEYS.aiProvider: a function that maps a
  *  deployment name to a LanguageModelV3. */
 export type AiProviderFn = (deploymentName: string) => LanguageModelV3;
+
+/** Same shape for the Foundry (OpenAI-compatible) provider. */
+export type FoundryProviderFn = (deploymentName: string) => LanguageModelV3;
+
+/** Same shape for the Anthropic (Azure /anthropic Messages API) provider. */
+export type AnthropicProviderFn = (deploymentName: string) => LanguageModelV3;
 
 /**
  * Returns the LanguageModelV3 for the given ChatModel by looking up the
@@ -127,4 +135,107 @@ export function createProductionAzureProvider(): AiProviderFn {
 // e.g. when e2e-fakes/register.ts has injected a test double first).
 if (!has(SERVICE_KEYS.aiProvider)) {
   register(SERVICE_KEYS.aiProvider, createProductionAzureProvider);
+}
+
+/**
+ * Returns the LanguageModelV3 for a Foundry-hosted ChatModel by looking up
+ * its deployment name and delegating to the registered foundryProvider.
+ */
+export function resolveFoundryModel(modelId: ChatModel): LanguageModelV3 {
+  const config = MODEL_CONFIGS[modelId];
+  if (!config) {
+    throw new Error(`resolveFoundryModel: unknown modelId "${modelId}"`);
+  }
+  const deploymentName = config.deploymentName;
+  if (!deploymentName) {
+    throw new Error(
+      `resolveFoundryModel: no deploymentName configured for model "${modelId}". ` +
+        `Check the relevant FOUNDRY_*_DEPLOYMENT_NAME env var.`,
+    );
+  }
+  const provider = resolve<FoundryProviderFn>(SERVICE_KEYS.foundryProvider);
+  return provider(deploymentName);
+}
+
+/**
+ * Production factory for the foundryProvider service.
+ *
+ * The Bühler Azure AI Foundry endpoint is OpenAI-compatible, so we use
+ * @ai-sdk/openai's `createOpenAI({ baseURL, apiKey })` pointed at its
+ * `/openai/v1` base URL. Chat Completions only — no Responses-API tools or
+ * reasoning options are sent (see provider-seam.ts foundry branch).
+ *
+ * Lazily validates env at first model resolution (not at registration) so a
+ * deployment that never downgrades to Foundry doesn't require the env to be
+ * set.
+ */
+export function createProductionFoundryProvider(): FoundryProviderFn {
+  const baseURL = process.env.FOUNDRY_OPENAI_BASE_URL;
+  const apiKey = process.env.FOUNDRY_API_KEY;
+  if (!baseURL || !apiKey) {
+    throw new Error(
+      "createProductionFoundryProvider: FOUNDRY_OPENAI_BASE_URL and FOUNDRY_API_KEY must be set.",
+    );
+  }
+  const provider = createOpenAI({ baseURL, apiKey });
+  return (deploymentName) => provider(deploymentName);
+}
+
+if (!has(SERVICE_KEYS.foundryProvider)) {
+  register(SERVICE_KEYS.foundryProvider, createProductionFoundryProvider);
+}
+
+/**
+ * Returns the LanguageModelV3 for an Anthropic-hosted ChatModel (Azure
+ * /anthropic surface) by deployment name, via the registered provider.
+ */
+export function resolveAnthropicModel(modelId: ChatModel): LanguageModelV3 {
+  const config = MODEL_CONFIGS[modelId];
+  if (!config) {
+    throw new Error(`resolveAnthropicModel: unknown modelId "${modelId}"`);
+  }
+  const deploymentName = config.deploymentName;
+  if (!deploymentName) {
+    throw new Error(
+      `resolveAnthropicModel: no deploymentName configured for model "${modelId}". ` +
+        `Check the relevant AZURE_ANTHROPIC_*_DEPLOYMENT_NAME env var.`,
+    );
+  }
+  const provider = resolve<AnthropicProviderFn>(SERVICE_KEYS.anthropicProvider);
+  return provider(deploymentName);
+}
+
+/**
+ * Production factory for the anthropicProvider service.
+ *
+ * Azure AI Foundry serves Claude via an Anthropic-native Messages API at
+ * `https://<resource>.services.ai.azure.com/anthropic/v1`. @ai-sdk/anthropic's
+ * `createAnthropic({ baseURL, apiKey })` speaks that protocol directly (x-api-key
+ * + anthropic-version headers; POSTs to `${baseURL}/messages`).
+ *
+ * Resource defaults to AZURE_OPENAI_API_INSTANCE_NAME. Auth uses
+ * AZURE_ANTHROPIC_API_KEY (x-api-key). Validated lazily at first resolution.
+ */
+export function createProductionAnthropicProvider(): AnthropicProviderFn {
+  const resourceName =
+    process.env.AZURE_ANTHROPIC_RESOURCE_NAME ??
+    process.env.AZURE_OPENAI_API_INSTANCE_NAME;
+  const apiKey = process.env.AZURE_ANTHROPIC_API_KEY;
+  if (!resourceName) {
+    throw new Error(
+      "createProductionAnthropicProvider: AZURE_ANTHROPIC_RESOURCE_NAME / AZURE_OPENAI_API_INSTANCE_NAME is not set.",
+    );
+  }
+  if (!apiKey) {
+    throw new Error(
+      "createProductionAnthropicProvider: AZURE_ANTHROPIC_API_KEY is not set.",
+    );
+  }
+  const baseURL = `https://${resourceName}.services.ai.azure.com/anthropic/v1`;
+  const anthropic = createAnthropic({ baseURL, apiKey });
+  return (deploymentName) => anthropic(deploymentName);
+}
+
+if (!has(SERVICE_KEYS.anthropicProvider)) {
+  register(SERVICE_KEYS.anthropicProvider, createProductionAnthropicProvider);
 }
