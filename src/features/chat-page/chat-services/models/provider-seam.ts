@@ -234,9 +234,22 @@ function resolveAnthropicBackedProvider(args: ResolveProviderArgs): ResolvedProv
     builtInTools["web_search"] = anthropic.tools.webSearch_20260209({ maxUses: 5 });
     builtInTools["web_fetch"] = anthropic.tools.webFetch_20260209({ maxUses: 5 });
   }
+
+  // Adaptive thinking is Claude 4.x's reasoning mode. We never send
+  // temperature/top_p/top_k (the route doesn't, and Opus 4.8 rejects them with
+  // a 400), so adaptive thinking is safe to leave on. `effort` is mapped from
+  // the user's ReasoningEffort selection; "minimal" → "low".
+  const anthropicOptions: Record<string, JSONValue> = {
+    thinking: { type: "adaptive" },
+  };
+  if (args.reasoning.supported && args.reasoning.effort) {
+    anthropicOptions.effort =
+      args.reasoning.effort === "minimal" ? "low" : args.reasoning.effort;
+  }
+
   return {
     model: resolveAnthropicModel(args.modelId),
     builtInTools,
-    providerOptions: {},
+    providerOptions: { anthropic: anthropicOptions },
   };
 }

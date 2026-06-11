@@ -245,7 +245,7 @@ describe("provider-seam — Anthropic branch", () => {
     expect((r.model as { __anthropicModel?: boolean }).__anthropicModel).toBe(true);
   });
 
-  it("emits no Azure-Responses keys; no built-in tools when toggles are off", () => {
+  it("enables adaptive thinking + mapped effort; no Azure-Responses keys; no tools when toggles off", () => {
     const r = resolveProvider({
       modelId: "claude-sonnet-4-6-2",
       thread: { id: "thread-xyz", codeInterpreterContainerId: undefined },
@@ -253,7 +253,20 @@ describe("provider-seam — Anthropic branch", () => {
       reasoning: { supported: true, effort: "high" },
     });
     expect(r.builtInTools).toEqual({});
-    expect(r.providerOptions).toEqual({});
+    const anth = r.providerOptions.anthropic as Record<string, unknown>;
+    expect(anth.thinking).toEqual({ type: "adaptive" });
+    expect(anth.effort).toBe("high");
+    expect(r.providerOptions.openai).toBeUndefined();
+  });
+
+  it("maps 'minimal' effort to 'low'", () => {
+    const r = resolveProvider({
+      modelId: "claude-opus-4-8",
+      thread: baseThread,
+      toggles: offToggles,
+      reasoning: { supported: true, effort: "minimal" },
+    });
+    expect((r.providerOptions.anthropic as Record<string, unknown>).effort).toBe("low");
   });
 
   it("wires Claude NATIVE web search + web fetch when the web-search toggle is on", () => {
@@ -265,7 +278,9 @@ describe("provider-seam — Anthropic branch", () => {
       reasoning: baseReasoning,
     });
     expect(Object.keys(r.builtInTools).sort()).toEqual(["web_fetch", "web_search"]);
-    expect(r.providerOptions).toEqual({});
+    // Still adaptive thinking, never an openai block.
+    expect((r.providerOptions.anthropic as Record<string, unknown>).thinking).toEqual({ type: "adaptive" });
+    expect(r.providerOptions.openai).toBeUndefined();
   });
 });
 

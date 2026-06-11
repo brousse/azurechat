@@ -17,10 +17,12 @@ export type ChatModel =
   | "gpt-5.4"
   | "gpt-5.4-mini"
   | "gpt-5.3-chat"
-  // Foundry-hosted (OpenAI-compatible) low-cost models, used as downgrade
-  // targets. Served via the "foundry" provider seam, not Azure Responses.
+  // Foundry-hosted (OpenAI-compatible) models. Served via the "foundry"
+  // provider seam, not Azure Responses. DeepSeek/Kimi double as downgrade
+  // targets; Grok is a selectable option.
   | "DeepSeek-V4-Pro"
   | "Kimi-K2.6"
+  | "grok-4.3"
   // Anthropic Claude models served via the Azure /anthropic surface
   // (Messages API) through the "anthropic" provider seam.
   | "claude-opus-4-8"
@@ -193,6 +195,24 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
     hardCapEligible: true,
     capabilities: ["vision", "imageGen", "code"],
   },
+  "grok-4.3": {
+    id: "grok-4.3",
+    name: "Grok 4.3",
+    description: "xAI Grok 4.3 (Foundry) — reasoning model",
+    getInstance: () => {
+      throw new Error(
+        "Foundry models run via the provider seam (streamText), not the legacy getInstance path",
+      );
+    },
+    provider: "foundry",
+    // Foundry emits the reasoning item inconsistently; no effort selector.
+    supportsReasoning: false,
+    supportsResponsesAPI: false,
+    deploymentName: process.env.FOUNDRY_GROK_DEPLOYMENT_NAME,
+    // TODO: confirm Grok pricing before relying on cost tracking (placeholder).
+    pricing: { inputPerMillion: 3.0, outputPerMillion: 15.0, cachedInputPerMillion: 0.75 },
+    contextWindow: 256000,
+  },
   // ── Anthropic Claude (Azure /anthropic Messages API) ───────────────────
   // Premium selectable models — NOT downgrade targets (Opus is pricier than
   // GPT-5.5). Served via the "anthropic" provider seam.
@@ -206,7 +226,7 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
       );
     },
     provider: "anthropic",
-    supportsReasoning: false,
+    supportsReasoning: true,
     supportsResponsesAPI: false,
     deploymentName: process.env.AZURE_ANTHROPIC_OPUS48_DEPLOYMENT_NAME,
     pricing: { inputPerMillion: 15.0, outputPerMillion: 75.0, cachedInputPerMillion: 1.5 },
@@ -226,7 +246,7 @@ export const MODEL_CONFIGS: Record<ChatModel, ModelConfig> = {
       );
     },
     provider: "anthropic",
-    supportsReasoning: false,
+    supportsReasoning: true,
     supportsResponsesAPI: false,
     deploymentName: process.env.AZURE_ANTHROPIC_SONNET46_DEPLOYMENT_NAME,
     pricing: { inputPerMillion: 3.0, outputPerMillion: 15.0, cachedInputPerMillion: 0.3 },

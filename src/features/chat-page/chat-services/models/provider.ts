@@ -12,6 +12,7 @@ import { createAzure } from "@ai-sdk/azure";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
+import { getAzureAiFoundryTokenProvider } from "@/features/common/services/azure-default-credential";
 import {
   register,
   resolve,
@@ -220,19 +221,33 @@ export function createProductionAnthropicProvider(): AnthropicProviderFn {
   const resourceName =
     process.env.AZURE_ANTHROPIC_RESOURCE_NAME ??
     process.env.AZURE_OPENAI_API_INSTANCE_NAME;
-  const apiKey = process.env.AZURE_ANTHROPIC_API_KEY;
   if (!resourceName) {
     throw new Error(
       "createProductionAnthropicProvider: AZURE_ANTHROPIC_RESOURCE_NAME / AZURE_OPENAI_API_INSTANCE_NAME is not set.",
     );
   }
-  if (!apiKey) {
-    throw new Error(
-      "createProductionAnthropicProvider: AZURE_ANTHROPIC_API_KEY is not set.",
-    );
-  }
   const baseURL = `https://${resourceName}.services.ai.azure.com/anthropic/v1`;
-  const anthropic = createAnthropic({ baseURL, apiKey });
+  const apiKey = process.env.AZURE_ANTHROPIC_API_KEY;
+
+  if (apiKey) {
+    // API-key path → SDK sends it as `x-api-key`.
+    const anthropic = createAnthropic({ baseURL, apiKey });
+    return (deploymentName) => anthropic(deploymentName);
+  }
+
+  // Entra ID path. The Foundry data plane needs the ai.azure.com scope (the
+  // cognitive-services scope is rejected with 401 here). Inject a fresh Bearer
+  // token per request via a custom fetch; pass a placeholder apiKey so the
+  // SDK's loadApiKey() check passes.
+  const getToken = getAzureAiFoundryTokenProvider();
+  const aadFetch: typeof fetch = async (input, init) => {
+    const token = await getToken();
+    const headers = new Headers(init?.headers);
+    headers.delete("x-api-key");
+    headers.set("Authorization", `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+  };
+  const anthropic = createAnthropic({ baseURL, apiKey: " ", fetch: aadFetch });
   return (deploymentName) => anthropic(deploymentName);
 }
 
