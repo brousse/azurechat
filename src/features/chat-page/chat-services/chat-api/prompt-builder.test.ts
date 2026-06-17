@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemMessage, sortFunctionTools } from "./prompt-builder";
+import type { ModelMessage } from "ai";
+import {
+  buildSystemMessage,
+  sortFunctionTools,
+  withAnthropicPromptCache,
+} from "./prompt-builder";
 
 // These tests lock down byte-for-byte stability of the parts of the request
 // that participate in the Azure OpenAI prompt cache key. A regression here
@@ -103,6 +108,81 @@ describe("sortFunctionTools", () => {
   it("handles tools with missing/empty names without throwing", () => {
     const tools = [{ name: "z" }, { name: undefined }, { name: "a" }];
     expect(() => sortFunctionTools(tools as any)).not.toThrow();
+  });
+});
+
+describe("withAnthropicPromptCache", () => {
+  const EPHEMERAL = { type: "ephemeral" };
+  const userMsgs: ModelMessage[] = [
+    { role: "user", content: "first question" },
+    { role: "assistant", content: "first answer" },
+    { role: "user", content: "follow-up question" },
+  ];
+
+  it("returns the system prompt as a cached SystemModelMessage (breakpoint #1: tools+system)", () => {
+    const { system } = withAnthropicPromptCache("SYSTEM PROMPT", userMsgs);
+    expect(system.role).toBe("system");
+    expect(system.content).toBe("SYSTEM PROMPT");
+    expect(system.providerOptions?.anthropic?.cacheControl).toEqual(EPHEMERAL);
+  });
+
+  it("marks the LAST message with a cache_control breakpoint (breakpoint #2: history)", () => {
+    const { messages } = withAnthropicPromptCache("SYS", userMsgs);
+    const last = messages[messages.length - 1];
+    expect(last.providerOptions?.anthropic?.cacheControl).toEqual(EPHEMERAL);
+  });
+
+  it("leaves all non-last messages untouched (≤ 2 breakpoints total → under Anthropic's max of 4)", () => {
+    const { messages } = withAnthropicPromptCache("SYS", userMsgs);
+    const cachedCount = messages.filter(
+      (m) => m.providerOptions?.anthropic?.cacheControl,
+    ).length;
+    expect(cachedCount).toBe(1); // the last message; the system breakpoint lives on `system`
+    expect(messages[0].providerOptions).toBeUndefined();
+    expect(messages[1].providerOptions).toBeUndefined();
+  });
+
+  it("does not mutate the caller's messages array or its objects", () => {
+    const snapshot = JSON.stringify(userMsgs);
+    const { messages } = withAnthropicPromptCache("SYS", userMsgs);
+    expect(JSON.stringify(userMsgs)).toBe(snapshot); // input unchanged
+    expect(messages).not.toBe(userMsgs);
+    expect(userMsgs[userMsgs.length - 1].providerOptions).toBeUndefined();
+  });
+
+  it("preserves message content/role while adding the breakpoint", () => {
+    const { messages } = withAnthropicPromptCache("SYS", userMsgs);
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("user");
+    expect(last.content).toBe("follow-up question");
+  });
+
+  it("merges with pre-existing providerOptions on the last message rather than clobbering", () => {
+    const withOpts: ModelMessage[] = [
+      {
+        role: "user",
+        content: "q",
+        providerOptions: { anthropic: { something: "keep-me" } },
+      },
+    ];
+    const { messages } = withAnthropicPromptCache("SYS", withOpts);
+    const anth = messages[0].providerOptions?.anthropic as Record<string, unknown>;
+    expect(anth.something).toBe("keep-me");
+    expect(anth.cacheControl).toEqual(EPHEMERAL);
+  });
+
+  it("handles an empty messages array (still caches the system prompt)", () => {
+    const { system, messages } = withAnthropicPromptCache("SYS", []);
+    expect(system.providerOptions?.anthropic?.cacheControl).toEqual(EPHEMERAL);
+    expect(messages).toEqual([]);
+  });
+
+  it("uses fresh cacheControl objects per breakpoint (no aliasing across messages)", () => {
+    const { system, messages } = withAnthropicPromptCache("SYS", userMsgs);
+    const sysCc = system.providerOptions?.anthropic?.cacheControl;
+    const lastCc = messages[messages.length - 1].providerOptions?.anthropic?.cacheControl;
+    expect(sysCc).not.toBe(lastCc); // distinct object identities
+    expect(sysCc).toEqual(lastCc); // but equal value
   });
 });
 

@@ -37,7 +37,7 @@ import {
   unregisterPublisher,
 } from "@/features/chat-page/chat-services/chat-api/stream-publisher";
 import { enforceSameOriginRequest } from "@/features/chat-page/chat-services/chat-api/same-origin";
-import { buildSystemMessage } from "@/features/chat-page/chat-services/chat-api/prompt-builder";
+import { buildSystemMessage, withAnthropicPromptCache } from "@/features/chat-page/chat-services/chat-api/prompt-builder";
 import { CHAT_DEFAULT_SYSTEM_PROMPT } from "@/features/theme/theme-config";
 import {
   FindAllExtensionForCurrentUserAndIds,
@@ -373,10 +373,23 @@ export async function POST(req: Request) {
   // keeps replaying for the next subscriber).
   const { abortController, publish } = startPublisher(ctx.thread.id);
 
+  // Anthropic (Claude via the Azure /anthropic Messages API) caches only the
+  // prefixes you mark with explicit cache_control breakpoints — there's no
+  // top-level auto-cache like the OpenAI promptCacheKey the Azure seam uses.
+  // For Claude, fold the system prompt into a cached SystemModelMessage and mark
+  // the latest turn so the tools+system+history prefix is replayed (cache-read)
+  // across turns of a thread instead of re-billed every turn. Other providers
+  // pass the plain system string unchanged.
+  const modelMessages = await convertToModelMessages(ctx.history);
+  const streamPrompt =
+    modelConfig.provider === "anthropic"
+      ? withAnthropicPromptCache(system, modelMessages)
+      : { system, messages: modelMessages };
+
   const result = streamText({
     model: resolved.model,
-    system,
-    messages: await convertToModelMessages(ctx.history),
+    system: streamPrompt.system,
+    messages: streamPrompt.messages,
     tools: allTools,
     stopWhen: stepCountIs(15),
     abortSignal: abortController.signal,
