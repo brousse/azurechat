@@ -4,6 +4,7 @@ import {
   isSandboxEmittingToolName,
   readContainerFileCitation,
   rewriteSandboxText,
+  sandboxFallbackUrl,
   SANDBOX_PATTERN,
 } from "./sandbox-rewrite-core";
 
@@ -152,6 +153,41 @@ describe("sandbox-rewrite-core", () => {
       const text = "plain prose with no sandbox urls";
       const out = rewriteSandboxText(text, new Map());
       expect(out).toBe(text);
+    });
+
+    it("falls back to the deterministic /api/images path when a filename is unresolved and a threadId is given", () => {
+      // The model's "commentary" download link is emitted before the tool
+      // runs, so fileMap is empty. With a threadId the URL must resolve to
+      // the same path onFinish ingests the file under — never raw sandbox:.
+      const unresolved: string[] = [];
+      const out = rewriteSandboxText(
+        "[Download the chart](sandbox:/mnt/data/random_visualization.png)",
+        new Map(),
+        unresolved,
+        "thread123",
+      );
+      expect(out).toBe(
+        "[Download the chart](/api/images?t=thread123&img=random_visualization.png)",
+      );
+      // Resolved via fallback → not reported as unresolved.
+      expect(unresolved).toEqual([]);
+    });
+
+    it("prefers a real fileMap URL over the fallback path", () => {
+      const map = new Map<string, string>([["a.png", "https://b/a.png"]]);
+      const out = rewriteSandboxText(
+        "![](sandbox:/mnt/data/a.png)",
+        map,
+        [],
+        "thread123",
+      );
+      expect(out).toBe("![](https://b/a.png)");
+    });
+
+    it("sandboxFallbackUrl encodes threadId and filename like GetImageUrlPath", () => {
+      expect(sandboxFallbackUrl("t/+id", "my file.png")).toBe(
+        "/api/images?t=t%2F%2Bid&img=my%20file.png",
+      );
     });
 
     it("global regex lastIndex does not leak between calls", () => {

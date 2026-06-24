@@ -85,15 +85,39 @@ export function readContainerFileCitation(
 }
 
 /**
- * Rewrites every sandbox-URL occurrence in `text` using `fileMap`. Filenames
- * absent from the map are appended to `unresolved` and left intact in the
- * returned text — markdown still renders, just with a broken image. Returns
- * the input string by reference when nothing changed.
+ * The canonical same-origin download path for a container file, keyed only by
+ * threadId + filename. This MUST stay byte-for-byte identical to
+ * `GetImageUrlPath` in chat-image-service.ts — that module is `server-only`
+ * and cannot be imported into this shared/pure core, so the format is
+ * duplicated here. The ingest pipeline always uploads a container file under
+ * its citation `filename` and serves it at this exact path, so the URL is
+ * correct even when emitted BEFORE the file has been ingested (the blob lands
+ * by onFinish, before the user can click).
+ */
+export function sandboxFallbackUrl(threadId: string, filename: string): string {
+  return `/api/images?t=${encodeURIComponent(threadId)}&img=${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Rewrites every sandbox-URL occurrence in `text` using `fileMap`. For a
+ * filename absent from the map:
+ *   - if `fallbackThreadId` is given, the URL is rewritten to the deterministic
+ *     `/api/images?t=…&img=…` path (see `sandboxFallbackUrl`). This is the
+ *     normal production case: the model often emits the `sandbox:` download
+ *     link in a "commentary" text part BEFORE code_interpreter runs, so no
+ *     tool-result / source / citation exists when that part's text-end forces
+ *     a flush. Leaving the raw `sandbox:` URL makes Streamdown render it as
+ *     "[blocked]"; the deterministic path resolves once onFinish ingests the
+ *     file under that filename.
+ *   - otherwise the filename is appended to `unresolved` and left intact
+ *     (markdown still renders, just with a broken link).
+ * Returns the input string by reference when nothing changed.
  */
 export function rewriteSandboxText(
   text: string,
   fileMap: Map<string, string>,
   unresolved: string[] = [],
+  fallbackThreadId?: string,
 ): string {
   if (fileMap.size === 0 && !SANDBOX_PATTERN.test(text)) {
     // Reset lastIndex from the .test() above so the next .replace() works.
@@ -104,6 +128,7 @@ export function rewriteSandboxText(
   const rewritten = text.replace(SANDBOX_PATTERN, (match, filename: string) => {
     const url = fileMap.get(filename);
     if (url) return url;
+    if (fallbackThreadId) return sandboxFallbackUrl(fallbackThreadId, filename);
     unresolved.push(filename);
     return match;
   });

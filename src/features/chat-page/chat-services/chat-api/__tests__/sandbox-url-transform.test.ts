@@ -4,8 +4,8 @@ import { createSandboxUrlTransform } from "../sandbox-url-transform";
 const SANDBOX = "sandbox:/mnt/data/red.png";
 const STORED = "https://blob.example.com/red.png";
 
-async function pipe(chunks: any[]): Promise<any[]> {
-  const transform = createSandboxUrlTransform()();
+async function pipe(chunks: any[], threadId?: string): Promise<any[]> {
+  const transform = createSandboxUrlTransform(threadId)();
   const out: any[] = [];
   const writer = transform.writable.getWriter();
   const reader = transform.readable.getReader();
@@ -111,6 +111,38 @@ describe("sandbox-url-transform", () => {
       .join("");
     expect(reassembled).toContain(SANDBOX);
     expect(reassembled).not.toContain(STORED);
+  });
+
+  it("rewrites a commentary-phase sandbox link (emitted before the tool runs) to the deterministic /api/images path when a threadId is supplied", async () => {
+    // Reproduces the observed gpt-5.x bug: the model emits the download link
+    // in a "commentary" text part BEFORE code_interpreter runs, so there is
+    // no tool-result / source / citation yet. That part's text-end forces a
+    // flush with an empty fileMap — pre-fix the raw sandbox URL leaked through
+    // and Streamdown rendered it as "[blocked]". With the threadId fallback it
+    // resolves to the same path onFinish ingests the file under.
+    const out = await pipe(
+      [
+        {
+          type: "text-delta",
+          id: "commentary",
+          text: "Here you go.\n\n[Download the chart](sandbox:/mnt/data/random_visualization.png)",
+        },
+        {
+          type: "text-end",
+          id: "commentary",
+          providerMetadata: { azure: { phase: "commentary" } },
+        },
+      ],
+      "thread-xyz",
+    );
+    const reassembled = out
+      .filter((c) => c.type === "text-delta")
+      .map((c) => c.text)
+      .join("");
+    expect(reassembled).toContain(
+      "/api/images?t=thread-xyz&img=random_visualization.png",
+    );
+    expect(reassembled).not.toContain("sandbox:/mnt/data");
   });
 
   it("does not register a tool output whose URL is itself a sandbox path", async () => {

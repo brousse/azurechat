@@ -544,7 +544,11 @@ export async function persistAssistantFromFinishEvent<TOOLS extends ToolSet>({
       )
     : undefined;
 
-  const { messages, unresolved } = rewriteSandboxUrls([assistant], preIngested);
+  const { messages, unresolved } = rewriteSandboxUrls(
+    [assistant],
+    preIngested,
+    threadId,
+  );
   if (unresolved.length > 0) {
     logWarn("persistAssistantFromFinishEvent: unresolved sandbox URLs", {
       filenames: unresolved,

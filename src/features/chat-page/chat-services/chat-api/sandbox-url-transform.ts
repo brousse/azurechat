@@ -232,7 +232,12 @@ export function createSandboxUrlTransform<TOOLS extends ToolSet>(
             // anything; wait for the next delta or text-end to resolve.
             return;
           }
-          const sandboxRewritten = rewriteSandboxText(emittable, fileMap);
+          const sandboxRewritten = rewriteSandboxText(
+            emittable,
+            fileMap,
+            [],
+            threadId,
+          );
           const fullyRewritten = rewriteDataUrls(sandboxRewritten, dataUrlToBlobRef);
           controller.enqueue({ ...chunk, text: fullyRewritten });
           return;
@@ -281,7 +286,12 @@ export function createSandboxUrlTransform<TOOLS extends ToolSet>(
           const partId = (chunk as { id: string }).id;
           const tail = pendingByPartId.get(partId) ?? "";
           if (tail.length > 0) {
-            const sandboxRewritten = rewriteSandboxText(tail, fileMap);
+            // Last chance to flush this part. If a `sandbox:` URL is still
+            // unresolved here (e.g. a commentary-phase download link emitted
+            // before code_interpreter ran), `threadId` lets rewriteSandboxText
+            // fall back to the deterministic /api/images path instead of
+            // leaking the raw sandbox URL → Streamdown "[blocked]".
+            const sandboxRewritten = rewriteSandboxText(tail, fileMap, [], threadId);
             const fullyRewritten = rewriteDataUrls(sandboxRewritten, dataUrlToBlobRef);
             controller.enqueue({
               type: "text-delta",

@@ -63,6 +63,7 @@ function harvestFileMap(message: UIMessage): Map<string, string> {
 export function rewriteSandboxUrlsInMessage(
   message: UIMessage,
   preIngested?: Map<string, string>,
+  fallbackThreadId?: string,
 ): {
   message: UIMessage;
   unresolved: string[];
@@ -80,7 +81,12 @@ export function rewriteSandboxUrlsInMessage(
   const newParts = message.parts.map((part) => {
     if (part.type !== "text") return part;
     const textPart = part as { type: "text"; text: string };
-    const rewritten = rewriteSandboxText(textPart.text, fileMap, unresolved);
+    const rewritten = rewriteSandboxText(
+      textPart.text,
+      fileMap,
+      unresolved,
+      fallbackThreadId,
+    );
     if (rewritten === textPart.text) return part;
     return { ...textPart, text: rewritten };
   });
@@ -100,13 +106,14 @@ export function rewriteSandboxUrlsInMessage(
 export function rewriteSandboxUrls(
   messages: UIMessage[],
   preIngested?: Map<string, string>,
+  fallbackThreadId?: string,
 ): {
   messages: UIMessage[];
   unresolved: string[];
 } {
   const unresolved: string[] = [];
   const out = messages.map((m) => {
-    const r = rewriteSandboxUrlsInMessage(m, preIngested);
+    const r = rewriteSandboxUrlsInMessage(m, preIngested, fallbackThreadId);
     unresolved.push(...r.unresolved);
     return r.message;
   });
