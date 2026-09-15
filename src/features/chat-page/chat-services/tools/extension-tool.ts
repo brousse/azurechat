@@ -43,6 +43,23 @@ function isExtensionArgs(value: unknown): value is ExtensionArgs {
   return typeof value === "object" && value !== null;
 }
 
+// True when the extension endpoint is this application's own /api/document
+// route. The built-in "Azure AI Search" extension points there. Such calls run
+// in-process (see execute below) instead of over the network: a server-to-server
+// HTTP request would not carry the user session cookie, and /api/document is now
+// behind the authentication middleware. In-process also removes a needless hop.
+function isSelfDocumentEndpoint(rawUrl: string): boolean {
+  try {
+    const target = new URL(rawUrl);
+    if (target.pathname !== "/api/document") return false;
+    const base = process.env.NEXTAUTH_URL;
+    if (!base) return false;
+    return target.host === new URL(base).host;
+  } catch {
+    return false;
+  }
+}
+
 export function extensionTool(
   functionDef: ExtensionFunctionModel,
   parsedFunction: { name: string; description: string; parameters: unknown },
@@ -97,6 +114,34 @@ export function extensionTool(
         (method === "POST" || method === "PUT" || method === "PATCH")
       ) {
         requestInit.body = JSON.stringify(args.body);
+      }
+
+      // The built-in Azure AI Search extension targets this app's own
+      // /api/document route. Run the handler in-process. See
+      // isSelfDocumentEndpoint above for why this avoids the network hop and the
+      // session-cookie problem.
+      if (isSelfDocumentEndpoint(url)) {
+        const { SearchAzureAISimilarDocuments } = await import(
+          "@/features/chat-page/chat-services/chat-api/chat-api-rag-extension"
+        );
+        const internalRequest = new Request(url, {
+          method: "POST",
+          headers: mergedHeaders,
+          body: requestInit.body ?? JSON.stringify(args.body ?? {}),
+        });
+        const internalResponse = await SearchAzureAISimilarDocuments(
+          internalRequest
+        );
+        if (!internalResponse.ok) {
+          logError("extensionTool: in-process document search failed", {
+            functionName: parsedFunction.name,
+            status: internalResponse.status,
+          });
+          throw new Error(
+            `Extension "${parsedFunction.name}" failed with status ${internalResponse.status}`
+          );
+        }
+        return await internalResponse.json();
       }
 
       // SSRF guard: refuse private/link-local/loopback addresses and

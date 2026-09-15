@@ -10,7 +10,6 @@ import {
 import { OpenAIEmbeddingInstance } from "@/features/common/services/openai";
 import { uniqueId } from "@/features/common/util";
 import { AzureKeyCredential, SearchClient, SearchIndex } from "@azure/search-documents";
-import { getAzureDefaultCredential } from "@/features/common/services/azure-default-credential";
 import { logDebug, logError } from "@/features/common/services/logger";
 
 export interface AzureSearchDocumentIndex {
@@ -28,7 +27,11 @@ export type DocumentSearchResponse = {
   document: AzureSearchDocumentIndex;
 };
 
-export const SimpleSearch = async (
+// SimpleSearch is an internal search primitive. It is intentionally NOT
+// exported, so it is never registered as a callable Next.js Server Action and
+// cannot be invoked by an unauthenticated request. Every in-file caller supplies
+// a trusted, scoped filter.
+const SimpleSearch = async (
   searchText?: string,
   filter?: string
 ): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
@@ -163,6 +166,28 @@ export const PersonaDocumentExistsInIndex = async (
   };
 };
 
+// Azure AI Search resource naming rules. A valid name begins and ends with a
+// letter or digit, uses only lowercase letters, digits and single dashes, and
+// contains no consecutive dashes. Enforcing this keeps the constructed request
+// host as exactly `<name>.search.windows.net`. A "/" or "?" in the value can no
+// longer relocate the request to an attacker host, and cannot move the fixed
+// suffix into the URL path or query.
+const SEARCH_SERVICE_NAME_PATTERN = /^(?!-)(?!.*--)[a-z0-9-]{2,60}(?<!-)$/;
+const SEARCH_INDEX_NAME_PATTERN = /^(?!-)(?!.*--)[a-z0-9-]{2,128}(?<!-)$/;
+
+const isValidSearchServiceName = (value: unknown): value is string =>
+  typeof value === "string" && SEARCH_SERVICE_NAME_PATTERN.test(value);
+
+const isValidSearchIndexName = (value: unknown): value is string =>
+  typeof value === "string" && SEARCH_INDEX_NAME_PATTERN.test(value);
+
+const searchConfigError = (
+  message: string
+): ServerActionResponse<Array<DocumentSearchResponse>> => ({
+  status: "ERROR",
+  errors: [{ message }],
+});
+
 export const ExtensionSimilaritySearch = async (props: {
   searchText: string;
   vectors: string[];
@@ -174,6 +199,23 @@ export const ExtensionSimilaritySearch = async (props: {
   try {
     const { searchText, vectors, apiKey, searchName, indexName, shouldCreateEmbedding = true } = props;
 
+    // Security controls for this endpoint:
+    //   1. Reject any searchName or indexName that is not a strict Azure name,
+    //      so the request host and path cannot be attacker-controlled.
+    //   2. Require an apiKey. The application managed identity is never used
+    //      here, so this endpoint cannot leak the application identity token.
+    if (!isValidSearchServiceName(searchName)) {
+      return searchConfigError("Invalid searchName for Azure AI Search.");
+    }
+    if (!isValidSearchIndexName(indexName)) {
+      return searchConfigError("Invalid indexName for Azure AI Search.");
+    }
+    if (!apiKey) {
+      return searchConfigError(
+        "An apiKey is required. This endpoint does not use the application identity."
+      );
+    }
+
     let embeddings;
     if (shouldCreateEmbedding) {
       const openai = OpenAIEmbeddingInstance();
@@ -183,12 +225,10 @@ export const ExtensionSimilaritySearch = async (props: {
       });
     }
 
+    // searchName is validated above, so this host is exactly
+    // `<searchName>.search.windows.net` and cannot be relocated.
     const endpoint = `https://${searchName}.search.windows.net`;
-
-    const credential = apiKey
-      ? new AzureKeyCredential(apiKey)
-      : getAzureDefaultCredential();
-
+    const credential = new AzureKeyCredential(apiKey);
     const searchClient = new SearchClient(endpoint, indexName, credential);
 
     const searchOptions: any = {

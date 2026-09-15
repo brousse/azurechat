@@ -18,8 +18,18 @@ vi.mock("../extension-url-guard", () => ({
   assertExtensionUrlAllowed: vi.fn(async (u: string) => u),
 }));
 
+vi.mock("@/features/chat-page/chat-services/chat-api/chat-api-rag-extension", () => ({
+  SearchAzureAISimilarDocuments: vi.fn(
+    async () =>
+      new Response(JSON.stringify([{ id: "c1", content: "doc" }]), {
+        status: 200,
+      })
+  ),
+}));
+
 // ─── subject under test ───────────────────────────────────────────────────────
 import { extensionTool } from "../extension-tool";
+import { SearchAzureAISimilarDocuments } from "@/features/chat-page/chat-services/chat-api/chat-api-rag-extension";
 import type { ExtensionModel, ExtensionFunctionModel } from "@/features/extensions-page/extension-services/models";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -243,5 +253,60 @@ describe("extensionTool – execute", () => {
     });
     // The tool wrapper should carry the description from parsedFunction
     expect((t as any).description).toBe("Query the API");
+  });
+});
+
+describe("extensionTool - in-process /api/document (no network hop)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("runs the app's own /api/document search in-process and never calls fetch", async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    // NEXTAUTH_URL is http://localhost:3000 in the test setup, so this endpoint
+    // is same-origin and must be handled in-process.
+    const functionDef = makeFunctionDef({
+      endpoint: "http://localhost:3000/api/document",
+      functionName: "aisearch",
+    });
+    const t = extensionTool(functionDef, PARSED_FUNCTION, {
+      extension: makeExtension(),
+      headerSecrets: {
+        searchName: "valid-search",
+        indexName: "valid-index",
+        apiKey: "k",
+      },
+    });
+
+    const result = await (t as any).execute(
+      { body: { search: "hello" } },
+      { abortSignal: undefined }
+    );
+
+    expect(SearchAzureAISimilarDocuments).toHaveBeenCalledOnce();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result).toEqual([{ id: "c1", content: "doc" }]);
+  });
+
+  it("still uses network fetch for an external extension endpoint", async () => {
+    const mockFetch = vi.fn(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    const functionDef = makeFunctionDef({
+      endpoint: "https://api.example.com/search",
+    });
+    const t = extensionTool(functionDef, PARSED_FUNCTION, {
+      extension: makeExtension(),
+      headerSecrets: {},
+    });
+
+    await (t as any).execute({ q: "hello" }, { abortSignal: undefined });
+
+    expect(SearchAzureAISimilarDocuments).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalledOnce();
   });
 });

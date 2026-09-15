@@ -51,13 +51,15 @@ vi.mock("@/features/common/services/azure-default-credential", () => ({
 }));
 
 import {
-  SimpleSearch,
   SimilaritySearch,
   IndexDocuments,
   DeleteDocumentsOfChatThread,
   DeleteSearchDocumentByPersonaDocumentId,
   EnsureIndexIsCreated,
+  ExtensionSimilaritySearch,
+  PersonaDocumentExistsInIndex,
 } from "./azure-ai-search";
+import * as azureSearchModule from "./azure-ai-search";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -79,16 +81,15 @@ async function* makeSearchResultsGen(items: any[]) {
   }
 }
 
-describe("chat-page.unit.search.001 — SimpleSearch iterates async results", () => {
-  it("returns OK with 2 results", async () => {
+describe("chat-page.unit.search.001 — internal search iterates async results", () => {
+  it("PersonaDocumentExistsInIndex returns the first matched document", async () => {
     const docs = [
-      { score: 0.9, document: { id: "d1", pageContent: "content1", user: hashedEmail, chatThreadId: "t1", metadata: null, personaDocumentId: null } },
-      { score: 0.8, document: { id: "d2", pageContent: "content2", user: hashedEmail, chatThreadId: "t1", metadata: null, personaDocumentId: null } },
+      { score: 0.9, document: { id: "d1", pageContent: "content1", user: hashedEmail, chatThreadId: "t1", metadata: null, personaDocumentId: "p1" } },
     ];
     mockSearch.mockResolvedValueOnce({ results: makeSearchResultsGen(docs) });
-    const result = await SimpleSearch("query");
+    const result = await PersonaDocumentExistsInIndex("p1");
     expect(result.status).toBe("OK");
-    expect((result as any).response.length).toBe(2);
+    expect((result as any).response.id).toBe("d1");
   });
 });
 
@@ -184,5 +185,40 @@ describe("chat-page.unit.search.009 — EnsureIndexIsCreated falls through to cr
     const result = await EnsureIndexIsCreated();
     expect(result.status).toBe("OK");
     expect((result as any).response.name).toBe("new-index");
+  });
+});
+
+describe("chat-page.unit.search.010 — ExtensionSimilaritySearch requires an apiKey", () => {
+  it("returns ERROR when apiKey is missing, so the application identity is never used", async () => {
+    const result = await ExtensionSimilaritySearch({
+      searchText: "q",
+      vectors: ["v"],
+      searchName: "valid-search",
+      indexName: "valid-index",
+      shouldCreateEmbedding: false,
+    });
+    expect(result.status).toBe("ERROR");
+    expect((result as any).errors[0].message).toContain("apiKey");
+  });
+});
+
+describe("chat-page.unit.search.011 — ExtensionSimilaritySearch rejects a host-relocating searchName", () => {
+  it("returns ERROR for a searchName containing a path or query delimiter", async () => {
+    const result = await ExtensionSimilaritySearch({
+      searchText: "q",
+      vectors: ["v"],
+      apiKey: "any-key",
+      searchName: "attacker.example.com/collector?x=",
+      indexName: "valid-index",
+      shouldCreateEmbedding: false,
+    });
+    expect(result.status).toBe("ERROR");
+    expect((result as any).errors[0].message).toContain("searchName");
+  });
+});
+
+describe("chat-page.unit.search.013 — internal primitives are not Server Actions", () => {
+  it("does not export SimpleSearch (it must stay internal, never a Server Action)", () => {
+    expect((azureSearchModule as Record<string, unknown>).SimpleSearch).toBeUndefined();
   });
 });
