@@ -180,6 +180,12 @@ export const UpsertChatMessage = async (
   chatModel: ChatMessageModel
 ): Promise<ServerActionResponse<ChatMessageModel>> => {
   try {
+    // Security: derive the owner from the authenticated session and never trust
+    // a caller-supplied userId. An anonymous call has no session, so userHashedId
+    // throws and the write is refused. An authenticated call can only write into
+    // its own /userId Cosmos partition.
+    const ownerUserId = await userHashedId();
+
     // Process images for persistence before saving
     const processedMessage = await processMessageForImagePersistence(
       chatModel.threadId,
@@ -190,6 +196,7 @@ export const UpsertChatMessage = async (
 
     const modelToSave: ChatMessageModel = {
       ...chatModel,
+      userId: ownerUserId, // owner is always the authenticated caller
       id: chatModel.id || uniqueId(), // Use existing ID if provided, otherwise generate new one
       createdAt: chatModel.createdAt || new Date(), // Use existing createdAt if provided
       type: MESSAGE_ATTRIBUTE,

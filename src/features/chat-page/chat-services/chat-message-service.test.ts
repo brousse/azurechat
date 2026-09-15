@@ -48,6 +48,7 @@ import {
   UpdateChatMessage,
 } from "./chat-message-service";
 import { MESSAGE_ATTRIBUTE } from "./models";
+import * as nextAuth from "next-auth";
 
 beforeEach(() => {
   historyItems = [];
@@ -348,5 +349,44 @@ describe("chat-page.unit.message-service.010 — UpdateChatMessage enforces user
     expect(captured).toBeDefined();
     const userParam = captured.parameters.find((p: any) => p.name === "@userId");
     expect(userParam?.value).toBe(hashedEmail);
+  });
+});
+
+describe("chat-page.unit.message-service.011 — UpsertChatMessage forces userId to the session owner", () => {
+  it("ignores a caller-supplied userId and writes the authenticated owner", async () => {
+    const result = await UpsertChatMessage({
+      id: "m1",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      content: "hi",
+      role: "assistant",
+      name: "assistant",
+      threadId: "victim-thread",
+      userId: "victim-hashed-id",
+      isDeleted: false,
+      type: MESSAGE_ATTRIBUTE,
+    });
+    expect(result.status).toBe("OK");
+    const doc = historyContainer.items.upsert.mock.calls[0][0];
+    expect(doc.userId).toBe(hashedEmail);
+    expect(doc.userId).not.toBe("victim-hashed-id");
+  });
+});
+
+describe("chat-page.unit.message-service.012 — UpsertChatMessage refuses an unauthenticated write", () => {
+  it("returns ERROR and never upserts when there is no session", async () => {
+    vi.mocked(nextAuth.getServerSession).mockResolvedValueOnce(null as any);
+    const result = await UpsertChatMessage({
+      id: "m2",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      content: "x",
+      role: "assistant",
+      name: "assistant",
+      threadId: "t",
+      userId: "victim-hashed-id",
+      isDeleted: false,
+      type: MESSAGE_ATTRIBUTE,
+    });
+    expect(result.status).toBe("ERROR");
+    expect(historyContainer.items.upsert).not.toHaveBeenCalled();
   });
 });

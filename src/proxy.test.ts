@@ -6,7 +6,10 @@ vi.mock("next-auth/jwt", () => ({
 }));
 
 import { getToken } from "next-auth/jwt";
-import { proxy } from "./proxy";
+import { proxy, config } from "./proxy";
+import { readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, relative } from "node:path";
 
 const mockedGetToken = getToken as ReturnType<typeof vi.fn>;
 
@@ -81,13 +84,11 @@ describe("proxy middleware", () => {
     expect(rewrite).toMatch(/\/unauthorized/);
   });
 
-  // middleware.unit.proxy.008 — anonymous hitting /api/images redirects to /
-  it("008: anonymous at /api/images redirects to /", async () => {
+  // middleware.unit.proxy.008 — anonymous hitting /api/images gets 401
+  it("008: anonymous at /api/images returns 401", async () => {
     mockedGetToken.mockResolvedValue(null);
     const res = await proxy(makeRequest("/api/images"));
-    expect(res.status).toBeGreaterThanOrEqual(300);
-    expect(res.status).toBeLessThan(400);
-    expect(res.headers.get("location")).toMatch(/\/$/);
+    expect(res.status).toBe(401);
   });
 
   // middleware.unit.proxy.009 — /health passes through unauthenticated
@@ -99,17 +100,13 @@ describe("proxy middleware", () => {
   });
 
   // middleware.unit.proxy.010 — /api/auth/... passes through unauthenticated
-  // NOTE: proxy() itself redirects /api/auth to / because /api is in requireAuth
-  // and there is no explicit exclusion in the proxy function. In production this
-  // is safe because the matcher in config does NOT include /api/auth, so proxy()
-  // is never invoked for that path. SOURCE BUG: proxy() should explicitly exclude
-  // /api/auth from the auth guard. Observable current behavior: redirects to /.
-  it("010: /api/auth/callback/azure — proxy() redirects (not guarded by matcher in prod)", async () => {
+  // proxy() now explicitly allows /api/auth so sign-in works under the
+  // catch-all matcher.
+  it("010: /api/auth/callback/azure passes through (public)", async () => {
     mockedGetToken.mockResolvedValue(null);
     const res = await proxy(makeRequest("/api/auth/callback/azure"));
-    // Observable: proxy() has no /api/auth exclusion, so it redirects to /
-    const location = res.headers.get("location");
-    expect(location).toMatch(/\/$/);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(401);
   });
 
   // middleware.unit.proxy.011 — anonymous hitting /persona/x redirects to /
@@ -120,4 +117,187 @@ describe("proxy middleware", () => {
     expect(res.status).toBeLessThan(400);
     expect(res.headers.get("location")).toMatch(/\/$/);
   });
+
+  // middleware.unit.proxy.012 — anonymous /api/document (the SSRF route) returns 401
+  it("012: anonymous at /api/document returns 401 (was previously unguarded)", async () => {
+    mockedGetToken.mockResolvedValue(null);
+    const res = await proxy(makeRequest("/api/document"));
+    expect(res.status).toBe(401);
+  });
+
+  // middleware.unit.proxy.013 — anonymous /extensions (Server Actions) redirected to /
+  it("013: anonymous at /extensions is redirected to / (Server Actions gated)", async () => {
+    mockedGetToken.mockResolvedValue(null);
+    const res = await proxy(makeRequest("/extensions"));
+    expect(res.status).toBeGreaterThanOrEqual(300);
+    expect(res.status).toBeLessThan(400);
+    expect(res.headers.get("location")).toMatch(/\/$/);
+  });
+
+  // middleware.unit.proxy.014 — authenticated /api/document passes through
+  it("014: authenticated at /api/document passes through", async () => {
+    mockedGetToken.mockResolvedValue({ isAdmin: false });
+    const res = await proxy(makeRequest("/api/document"));
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression guards. The original vulnerability was that config.matcher listed
+// only some routes, so the proxy never ran for /api/document or /extensions.
+// Calling proxy() directly bypasses the matcher, so these tests check the
+// matcher itself and the default-deny behaviour for unknown routes.
+// ---------------------------------------------------------------------------
+
+function matcherMatches(pathname: string): boolean {
+  const patterns = config.matcher as string[];
+  return patterns.some((p) => new RegExp(`^${p}$`).test(pathname));
+}
+
+describe("proxy - matcher covers every sensitive route", () => {
+  it.each([
+    "/api/document",
+    "/extensions",
+    "/api/chat",
+    "/api/images",
+    "/api/usage",
+    "/api/models",
+    "/api/code-interpreter/upload",
+    "/chat/abc",
+    "/agent/x",
+    "/persona/x",
+    "/prompt",
+    "/reporting",
+    "/a-brand-new-page",
+    "/api/some-future-endpoint",
+  ])("runs the proxy for %s", (path) => {
+    expect(matcherMatches(path)).toBe(true);
+  });
+
+  it.each([
+    "/_next/static/chunk.js",
+    "/_next/image",
+    "/favicon.ico",
+    "/logo.svg",
+    "/robots.txt",
+    "/hero.png",
+    "/app.css",
+  ])("skips static asset %s", (path) => {
+    expect(matcherMatches(path)).toBe(false);
+  });
+});
+
+describe("proxy - default-deny for unknown/future routes", () => {
+  beforeEach(() => {
+    mockedGetToken.mockReset();
+  });
+
+  it("blocks an unknown API route with no session (401)", async () => {
+    mockedGetToken.mockResolvedValue(null);
+    const res = await proxy(makeRequest("/api/some-future-endpoint"));
+    expect(res.status).toBe(401);
+  });
+
+  it("blocks an unknown page route with no session (redirect to /)", async () => {
+    mockedGetToken.mockResolvedValue(null);
+    const res = await proxy(makeRequest("/a-brand-new-page"));
+    expect(res.status).toBeGreaterThanOrEqual(300);
+    expect(res.status).toBeLessThan(400);
+    expect(res.headers.get("location")).toMatch(/\/$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Endpoint enumeration guard. Walks src/app for every route.ts and page.tsx,
+// derives the URL, and asserts the matcher runs the proxy for it and that every
+// non-public endpoint requires a session. A new endpoint is covered
+// automatically. If the matcher ever stops covering one, or a route is added
+// under a public prefix by mistake, this fails.
+// ---------------------------------------------------------------------------
+
+const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "app");
+
+function collectEndpointFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      out.push(...collectEndpointFiles(full));
+    } else if (/^(route|page)\.(ts|tsx)$/.test(entry)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function toUrlPath(file: string): string {
+  const rel = relative(APP_DIR, file)
+    .replace(/\\/g, "/")
+    .replace(/\/(route|page)\.(ts|tsx)$/, "");
+  const segments = rel
+    .split("/")
+    .filter(Boolean)
+    .filter((seg) => !(seg.startsWith("(") && seg.endsWith(")")))
+    .map((seg) => (seg.startsWith("[") ? "x" : seg));
+  return "/" + segments.join("/");
+}
+
+const isApiRoute = (file: string) => /[/\\]route\.(ts|tsx)$/.test(file);
+const isPublicUrl = (p: string) =>
+  p === "/" ||
+  p === "/health" ||
+  p.startsWith("/api/auth") ||
+  p === "/embed" ||
+  p.startsWith("/embed/");
+
+const discoveredEndpoints = collectEndpointFiles(APP_DIR).map((file) => ({
+  file,
+  url: toUrlPath(file),
+  api: isApiRoute(file),
+}));
+
+describe("proxy - every app endpoint is covered by the matcher", () => {
+  it("discovers a non-trivial number of endpoints", () => {
+    expect(discoveredEndpoints.length).toBeGreaterThan(5);
+  });
+
+  it.each(discoveredEndpoints.map((e) => [e.url, e.file] as const))(
+    "matcher runs the proxy for %s",
+    (url) => {
+      expect(matcherMatches(url)).toBe(true);
+    }
+  );
+});
+
+describe("proxy - every non-public endpoint requires a session", () => {
+  beforeEach(() => {
+    mockedGetToken.mockReset();
+  });
+
+  const protectedApi = discoveredEndpoints.filter(
+    (e) => e.api && !isPublicUrl(e.url)
+  );
+  it.each(protectedApi.map((e) => [e.url] as const))(
+    "unauthenticated API %s returns 401",
+    async (url) => {
+      mockedGetToken.mockResolvedValue(null);
+      const res = await proxy(makeRequest(url));
+      expect(res.status).toBe(401);
+    }
+  );
+
+  const protectedPages = discoveredEndpoints.filter(
+    (e) => !e.api && !isPublicUrl(e.url)
+  );
+  it.each(protectedPages.map((e) => [e.url] as const))(
+    "unauthenticated page %s redirects to login",
+    async (url) => {
+      mockedGetToken.mockResolvedValue(null);
+      const res = await proxy(makeRequest(url));
+      expect(res.status).toBeGreaterThanOrEqual(300);
+      expect(res.status).toBeLessThan(400);
+      expect(res.headers.get("location")).toMatch(/\/$/);
+    }
+  );
 });
