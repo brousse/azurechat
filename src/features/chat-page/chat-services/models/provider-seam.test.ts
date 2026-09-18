@@ -35,6 +35,10 @@ vi.mock("@ai-sdk/azure", () => ({
 }));
 
 import { resolveProvider, getFileIdsSignature } from "./provider-seam";
+import {
+  PROMPT_CACHE_KEY_MAX_LENGTH,
+  boundPromptCacheKey,
+} from "./prompt-cache-key";
 
 const baseThread = { id: "thread-1", codeInterpreterContainerId: undefined };
 const baseReasoning = { supported: false, effort: undefined };
@@ -185,6 +189,24 @@ describe("provider-seam — Azure branch", () => {
       (defaulted.providerOptions.openai as Record<string, unknown>)
         .promptCacheKey,
     ).toBe("thread-parent");
+  });
+
+  it("bounds an over-long promptCacheKey so the provider cannot 400 the turn", () => {
+    // The shape that actually broke: two 36-char nanoids joined by ":sub:".
+    const overLong = `${"a".repeat(36)}:sub:${"b".repeat(36)}`;
+    expect(overLong).toHaveLength(77);
+
+    const r = resolveProvider({
+      modelId: "gpt-5.6-luna",
+      thread: { id: "thread-parent", codeInterpreterContainerId: undefined },
+      toggles: offToggles,
+      reasoning: baseReasoning,
+      promptCacheKey: overLong,
+    });
+    const key = (r.providerOptions.openai as Record<string, unknown>)
+      .promptCacheKey as string;
+    expect(key).toHaveLength(PROMPT_CACHE_KEY_MAX_LENGTH);
+    expect(key).toBe(boundPromptCacheKey(overLong));
   });
 
   it("emits reasoning options only when supported + effort provided", () => {
