@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 
 import {
   DEFAULT_PROMPT_CACHE_KEY_SHARDS,
+  PROMPT_CACHE_KEY_MAX_LENGTH,
+  boundPromptCacheKey,
   getPromptCacheKeyShards,
   getPromptCacheKeyStrategy,
   resolvePromptCacheKey,
@@ -216,5 +218,61 @@ describe("resolvePromptCacheKey", () => {
         }),
       ).toBe("thread-42");
     }
+  });
+});
+
+// Real `uniqueId()` output: 36 chars from the nanoid alphabet.
+const ID_A = "0tGqXk3mZpB7vNr1sLdW9cYeHuJf4AiQ2oRb";
+const ID_B = "0tGqXk3mZpB7vNr1sLdW9cYeHuJf4AiQ2oRc";
+
+describe("boundPromptCacheKey", () => {
+  it("leaves a key at exactly the limit untouched", () => {
+    const key = "k".repeat(PROMPT_CACHE_KEY_MAX_LENGTH);
+    expect(boundPromptCacheKey(key)).toBe(key);
+    expect(PROMPT_CACHE_KEY_MAX_LENGTH).toBe(64);
+  });
+
+  it("brings a key one char over the limit back to exactly 64", () => {
+    const bounded = boundPromptCacheKey("k".repeat(PROMPT_CACHE_KEY_MAX_LENGTH + 1));
+    expect(bounded).toHaveLength(PROMPT_CACHE_KEY_MAX_LENGTH);
+  });
+
+  it("is deterministic — the same input always maps to the same key", () => {
+    const key = `${ID_A}:sub:${ID_B}`;
+    expect(boundPromptCacheKey(key)).toBe(boundPromptCacheKey(key));
+  });
+
+  it("separates two over-long keys that share the truncated head (negative)", () => {
+    const shared = "s".repeat(55);
+    const first = `${shared}${"a".repeat(22)}`;
+    const second = `${shared}${"b".repeat(22)}`;
+    expect(first).toHaveLength(77);
+    expect(second).toHaveLength(77);
+    expect(boundPromptCacheKey(first)).not.toBe(boundPromptCacheKey(second));
+  });
+
+  it("brings the real sub-agent shape (36-char id + :sub: + 36-char id) under the limit", () => {
+    const raw = `${ID_A}:sub:${ID_B}`;
+    expect(raw).toHaveLength(77);
+    expect(boundPromptCacheKey(raw)).toHaveLength(PROMPT_CACHE_KEY_MAX_LENGTH);
+  });
+
+  it("never has to touch the keys the other producers build", () => {
+    const persona = resolvePromptCacheKey({
+      modelId: "gpt-5.6-terra",
+      threadId: ID_A,
+      personaId: ID_B,
+      toolNames: ["search_documents", "code_interpreter"],
+      userKey: USER_A,
+      strategy: "persona",
+      shards: 4,
+    });
+    expect(persona.length).toBeLessThanOrEqual(PROMPT_CACHE_KEY_MAX_LENGTH);
+    expect(boundPromptCacheKey(persona)).toBe(persona);
+
+    // history-summary-service.ts keys its summarisation turn this way.
+    const summary = `summary:${ID_A}`;
+    expect(summary.length).toBeLessThanOrEqual(PROMPT_CACHE_KEY_MAX_LENGTH);
+    expect(boundPromptCacheKey(summary)).toBe(summary);
   });
 });

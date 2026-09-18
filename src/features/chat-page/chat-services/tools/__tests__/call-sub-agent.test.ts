@@ -68,6 +68,10 @@ vi.mock("../registry", () => ({
 
 // ─── subject under test ───────────────────────────────────────────────────────
 import { callSubAgentTool } from "../call-sub-agent";
+import {
+  PROMPT_CACHE_KEY_MAX_LENGTH,
+  toolsetSignature,
+} from "../../models/prompt-cache-key";
 import type { ToolContext } from "../tool-context";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -178,8 +182,12 @@ describe("callSubAgentTool – execute", () => {
     };
     const openai = options.providerOptions?.openai ?? {};
     // Namespaced under the parent thread but distinct from it, so a repeated
-    // delegation reads its own cached prefix instead of rewriting one.
-    expect(openai.promptCacheKey).toBe("thread-1:sub:agent-1");
+    // delegation reads its own cached prefix instead of rewriting one. The
+    // agent id is hashed so real 36-char ids stay under OpenAI's 64-char
+    // prompt_cache_key limit.
+    const expectedKey = `thread-1:sub:${toolsetSignature(["agent-1"])}`;
+    expect(openai.promptCacheKey).toBe(expectedKey);
+    expect(expectedKey.length).toBeLessThanOrEqual(PROMPT_CACHE_KEY_MAX_LENGTH);
     expect(openai.store).toBe(false);
     // gpt-5.4-mini is supportsReasoning:false → no effort keys are sent.
     expect(openai.reasoningEffort).toBeUndefined();

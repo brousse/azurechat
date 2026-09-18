@@ -8,6 +8,7 @@ import { MODEL_CONFIGS, DEFAULT_MODEL, type ChatModel } from "../models";
 import { resolveProvider } from "../models/provider-seam";
 import { resolveMaxOutputTokens } from "../models/max-output-tokens";
 import { resolveReasoningEffort } from "../models/reasoning-effort";
+import { toolsetSignature } from "../models/prompt-cache-key";
 import { stabilizeToolset } from "./stabilize-toolset";
 import { computeTokenCostUsd } from "../chat-api/usage-data";
 import type { ToolContext } from "./tool-context";
@@ -134,8 +135,11 @@ export function callSubAgentTool(ctx: ToolContext) {
         // A sub-agent's prefix is its own persona message plus the delegated
         // task — nothing in common with the parent thread's prefix, so it
         // gets its own cache key namespace rather than polluting the
-        // parent's.
-        promptCacheKey: `${ctx.threadId}:sub:${args.agent_id}`,
+        // parent's. The agent id is hashed rather than spelled out: both ids
+        // are 36-char nanoids, so the old `<threadId>:sub:<agentId>` shape was
+        // 77 chars and OpenAI 400s any prompt_cache_key over 64. Hashing keeps
+        // the thread id readable and lands at 49.
+        promptCacheKey: `${ctx.threadId}:sub:${toolsetSignature([args.agent_id])}`,
       });
 
       logDebug("callSubAgentTool: calling generateText", {

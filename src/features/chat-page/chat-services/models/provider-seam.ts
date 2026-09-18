@@ -32,6 +32,7 @@ import type { LanguageModelV4, JSONValue } from "@ai-sdk/provider";
 import { azure } from "@ai-sdk/azure";
 import { anthropic } from "@ai-sdk/anthropic";
 import { resolveAzureModel, resolveFoundryModel, resolveAnthropicModel } from "./provider";
+import { boundPromptCacheKey } from "./prompt-cache-key";
 import {
   MODEL_CONFIGS,
   type ChatModel,
@@ -190,8 +191,12 @@ function resolveAzureBackedProvider(
   // Provider options. The @ai-sdk/azure model speaks OpenAI Responses API
   // under the hood so the providerOptions namespace is "openai", not
   // "azure" — verified from @ai-sdk/openai/internal types.
+  // Bounded here rather than at each producer: this is the single place the
+  // key reaches the wire, so every caller — route, history summary, sub-agent
+  // tool, the thread-id default — is covered by one guard and no future
+  // producer can 400 the turn with an over-long key.
   const openaiOptions: Record<string, JSONValue> = {
-    promptCacheKey: args.promptCacheKey ?? args.thread.id,
+    promptCacheKey: boundPromptCacheKey(args.promptCacheKey ?? args.thread.id),
     store: false,
   };
   // GPT-5.6 exposes `prompt_cache_options`: implicit mode keeps the automatic

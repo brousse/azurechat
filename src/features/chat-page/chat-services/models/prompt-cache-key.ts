@@ -74,6 +74,27 @@ export function toolsetSignature(toolNames: readonly string[]): string {
 }
 
 /**
+ * OpenAI rejects a `prompt_cache_key` longer than 64 characters with a 400 —
+ * and that 400 kills the whole turn, not just the caching. Our ids are 36-char
+ * nanoids, so any key that concatenates two of them (a sub-agent key was
+ * `<threadId>:sub:<agentId>` = 77) blew the limit.
+ *
+ * Truncation alone would be wrong: two different keys sharing a prefix would
+ * collapse onto one cache namespace and read each other's prefix. So the tail
+ * carries a signature of the WHOLE original key. Determinism is the point —
+ * the same input must always map to the same key, otherwise every turn writes
+ * a fresh prefix and the cache never pays off.
+ */
+export const PROMPT_CACHE_KEY_MAX_LENGTH = 64;
+
+export function boundPromptCacheKey(key: string): string {
+  if (key.length <= PROMPT_CACHE_KEY_MAX_LENGTH) return key;
+  // 9 = the ":" separator plus the 8 hex chars of the signature.
+  const head = key.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH - 9);
+  return `${head}:${toolsetSignature([key])}`;
+}
+
+/**
  * Deterministic shard for a user, from an FNV hash of the subject key.
  *
  * One path, deliberately. There used to be a fast path that read the leading
